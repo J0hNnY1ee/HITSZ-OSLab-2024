@@ -1,0 +1,68 @@
+#!/usr/bin/env python
+
+import re
+import subprocess
+from gradelib import *
+
+r = Runner(save("xv6.out"))
+
+@test(40, "exit test")
+def test_exit_test():
+    subprocess.run(["make", "clean"])
+    r.run_qemu(shell_script([
+        'exittest'
+    ]), make_args=["LAB_SYSCALL_TEST=on"])
+    r.match('proc \\d+ exit, parent pid \\d+, name \\w+, state \\w+')
+    r.match('proc \\d+ exit, child 0, pid \\d+, name \\w+, state \\w+')
+    r.match('proc \\d+ exit, child 1, pid \\d+, name \\w+, state \\w+')
+    r.match('proc \\d+ exit, child 2, pid \\d+, name \\w+, state \\w+')
+
+@test(40, "wait test")
+def test_wait_test():
+    r.run_qemu(shell_script([
+        'waittest'
+    ]), make_args=["LAB_SYSCALL_TEST=on"])
+    r.match('wait test OK')
+
+@test(20, "yield test")
+def test_yield_test():
+    r.run_qemu(shell_script([
+        'yieldtest'
+    ]), make_args=["CPUS=1", "LAB_SYSCALL_TEST=on"])
+    r.match("parent yield")
+
+    match = re.search(r'Save the context of the process to the memory region from address (0x[0-9a-fA-F]+) to (0x[0-9a-fA-F]+)', r.qemu.output, re.MULTILINE)
+    assert match is not None, "can't find this sentence: Save the context of the process to the memory region from address (0x[0-9a-fA-F]+) to (0x[0-9a-fA-F]+)"
+    addr1 = int(match.group(1), 16)
+    addr2 = int(match.group(2), 16)
+    difference = addr2 - addr1
+    def assert_custom_equal(actual, expected, msg=""):
+        if actual != expected:
+            raise AssertionError(msg)
+    assert_custom_equal(difference, 112, "context address saved region is wrong")
+
+    matches = re.findall("Current running process pid is \\w+ and user pc is \\w+", r.qemu.output, re.MULTILINE)
+    sepc = [re.search(r'0x[0-9a-fA-F]+', item).group() for item in matches][0]
+    toolprefix = test_yield_test.options.toolprefix
+    result = subprocess.run([f"{toolprefix}addr2line", sepc, "-f", "-s", "-e", "user/_yieldtest"], stdout=subprocess.PIPE, check=True)
+    out = result.stdout.decode("utf-8")
+    assert_equal(out[:6], "yield\n")
+
+    match = re.search(r'Next runnable process pid is (\d+) and user pc is (0x[0-9a-fA-F]+)', r.qemu.output, re.MULTILINE)
+    assert match is not None, "can't find this sentence: Next runnable process pid is (\\d+) and user pc is (0x[0-9a-fA-F]+)"
+    pid = match.group(1)  
+    sepc = match.group(2)  
+    matches = re.findall("Next runnable process pid is \\w+ and user pc is \\w+", r.qemu.output, re.MULTILINE)
+    result = subprocess.run([f"{toolprefix}addr2line", sepc, "-f", "-s", "-e", "user/_yieldtest"], stdout=subprocess.PIPE, check=True)
+    out = result.stdout.decode("utf-8")
+    assert_equal(out[:5], "fork\n")
+    r.match(f".*?Child with PID {pid} begins to run")
+    r.match(".*?Child with PID 5 begins to run")
+    r.match(".*?Child with PID 6 begins to run")
+    r.match(".*?parent yield finished")
+
+
+run_tests()
+
+
+

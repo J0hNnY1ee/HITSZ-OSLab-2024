@@ -24,3 +24,4 @@ compile_commands.json
 .cache/
 commit.patch
 mkfs/mkfs
+time.txt

@@ -66,30 +66,33 @@ void brelse(struct buf *b) {
   if (!holdingsleep(&b->lock))
     panic("brelse");
 
-  releasesleep(&b->lock);  // 释放缓冲区的睡眠锁
+  releasesleep(&b->lock);  // 释放睡眠锁
 
-  int index = hash(b->dev, b->blockno);
+  int index = hash(b->dev, b->blockno);  // 获取哈希桶索引
 
   acquire(&bcache.bucket_locks[index]);  // 获取桶的锁
-  if (b->refcnt <= 0)
+
+  if (b->refcnt <= 0)  // 检查引用计数是否有效
     panic("brelse: refcnt underflow");
 
   b->refcnt--;  // 减少引用计数
-  if (b->refcnt == 0) {  // 如果没有进程在使用该块
-    // 将块移到桶的链表头部
+
+  if (b->refcnt == 0) {  // 没有进程在使用该块
+    // 将块移到链表头部
     if (b->prev) b->prev->next = b->next;
     if (b->next) b->next->prev = b->prev;
     if (bcache.hash_heads[index] == b) bcache.hash_heads[index] = b->next;
 
     b->next = bcache.hash_heads[index];
     b->prev = 0;
-    if (bcache.hash_heads[index] != 0) {
+    if (bcache.hash_heads[index]) {
       bcache.hash_heads[index]->prev = b;
     }
     bcache.hash_heads[index] = b;
   }
   release(&bcache.bucket_locks[index]);  // 释放桶的锁
 }
+
 
 // 获取指定块的缓冲区，或者从其他桶获取未使用的缓冲区
 static struct buf* bget(uint dev, uint blockno) {
@@ -162,20 +165,20 @@ void bwrite(struct buf *b) {
   virtio_disk_rw(b, 1);
 }
 
-// 固定缓冲区，防止其被回收
 void bpin(struct buf *b) {
   int index = hash(b->dev, b->blockno);
 
   acquire(&bcache.bucket_locks[index]);
-  b->refcnt++;
+  b->refcnt++;  // 原子性增加引用计数
   release(&bcache.bucket_locks[index]);
 }
 
-// 取消固定缓冲区
 void bunpin(struct buf *b) {
   int index = hash(b->dev, b->blockno);
 
   acquire(&bcache.bucket_locks[index]);
-  b->refcnt--;
+  if (b->refcnt <= 0)
+    panic("bunpin: refcnt underflow");  // 检查引用计数有效性
+  b->refcnt--;  // 原子性减少引用计数
   release(&bcache.bucket_locks[index]);
 }

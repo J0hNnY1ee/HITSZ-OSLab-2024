@@ -1,18 +1,4 @@
-// Buffer cache.
-//
-// The buffer cache is a linked list of buf structures holding
-// cached copies of disk block contents.  Caching disk blocks
-// in memory reduces the number of disk reads and also provides
-// a synchronization point for disk blocks used by multiple processes.
-//
-// Interface:
-// * To get a buffer for a particular disk block, call bread.
-// * After changing buffer data, call bwrite to write it to disk.
-// * When done with the buffer, call brelse.
-// * Do not use the buffer after calling brelse.
-// * Only one process at a time can use a buffer,
-//     so do not keep them longer than necessary.
-
+// 用于磁盘块的缓冲区缓存
 
 #include "types.h"
 #include "param.h"
@@ -23,162 +9,231 @@
 #include "fs.h"
 #include "buf.h"
 
+#define NBUCKETS 13  // 定义哈希桶的数量
 
-// 定义哈希桶的数量
-#define NHASH 17
-
-// 缓冲区缓存结构体，包含缓冲区数组和哈希桶
-struct {
-  struct spinlock bucket_locks[NHASH];  // 每个哈希桶的自旋锁
-  struct buf buf[NBUF];                 // 缓冲区数组
-  struct buf *hash_heads[NHASH];        // 每个桶的链表头
+// 缓冲区缓存结构体，包含每个桶的锁、缓冲区数组、桶头节点和空闲列表
+struct bcache {
+  struct spinlock lock[NBUCKETS];     // 每个桶的锁
+  struct buf buf[NBUF];               // 缓冲区数组
+  struct buf bucket[NBUCKETS];        // 每个哈希桶的链表头节点
+  int freelist[NBUCKETS];             // 每个桶的空闲块数量
 } bcache;
 
-// 初始化缓冲区缓存及哈希桶
-void binit(void) {
-  // 初始化每个哈希桶的锁和链表头
-  for (int i = 0; i < NHASH; i++) {
-    initlock(&bcache.bucket_locks[i], "bcache_bucket");
-    bcache.hash_heads[i] = 0;
-  }
+// 链表操作辅助函数：将节点插入链表头部
+static void
+insert_head(struct buf *head, struct buf *node)
+{
+  node->next = head->next;
+  node->prev = head;
+  head->next->prev = node;
+  head->next = node;
+}
 
-  // 初始化所有缓冲区，并放入第一个哈希桶
-  for (int i = 0; i < NBUF; i++) {
-    struct buf *b = &bcache.buf[i];
-    b->refcnt = 0;  // 初始化引用计数为0
-    b->next = bcache.hash_heads[0];
-    b->prev = 0;
-    if (bcache.hash_heads[0] != 0) {
-      bcache.hash_heads[0]->prev = b;
+// 链表操作辅助函数：将节点插入链表尾部
+static void
+insert_tail(struct buf *head, struct buf *node)
+{
+  node->next = head;
+  node->prev = head->prev;
+  head->prev->next = node;
+  head->prev = node;
+}
+
+// 从链表中移除最近最少使用的节点（从链表尾部开始查找）
+// 返回找到的空闲节点，如果没有找到空闲节点，则返回 0
+static struct buf*
+remove_lru(struct buf *head)
+{
+  struct buf *node;
+  for(node = head->prev; node != head; node = node->prev) {
+    if(node->refcnt == 0) {  // 找到空闲块
+      node->next->prev = node->prev;
+      node->prev->next = node->next;
+      return node;
     }
-    bcache.hash_heads[0] = b;
-    initsleeplock(&b->lock, "buffer");
   }
+  return 0;
 }
 
-// 哈希函数，基于设备号和块号计算桶索引
-static int hash(uint dev, uint blockno) {
-  return (dev ^ blockno) % NHASH;
+// 哈希函数，用于计算块在哈希桶中的索引
+static uint
+hash(uint dev, uint blockno)
+{
+  return blockno % NBUCKETS;  // 使用块号对桶数量取模
 }
 
-// 释放缓冲区，并将其移至桶的链表头部
-void brelse(struct buf *b) {
-  if (!holdingsleep(&b->lock))
-    panic("brelse");
-
-  releasesleep(&b->lock);  // 释放睡眠锁
-
-  int index = hash(b->dev, b->blockno);  // 获取哈希桶索引
-
-  acquire(&bcache.bucket_locks[index]);  // 获取桶的锁
-
-  if (b->refcnt <= 0)  // 检查引用计数是否有效
-    panic("brelse: refcnt underflow");
-
-  b->refcnt--;  // 减少引用计数
-
-  if (b->refcnt == 0) {  // 没有进程在使用该块
-    // 将块移到链表头部
-    if (b->prev) b->prev->next = b->next;
-    if (b->next) b->next->prev = b->prev;
-    if (bcache.hash_heads[index] == b) bcache.hash_heads[index] = b->next;
-
-    b->next = bcache.hash_heads[index];
-    b->prev = 0;
-    if (bcache.hash_heads[index]) {
-      bcache.hash_heads[index]->prev = b;
+// 选择拥有最多空闲缓冲块的桶
+static int
+find_richest_bucket(void)
+{
+  int max_free = 0;
+  int selected_bucket = -1;
+  
+  for(int i = 0; i < NBUCKETS; i++) {
+    if(bcache.freelist[i] > max_free) {  // 找到空闲块最多的桶
+      max_free = bcache.freelist[i];
+      selected_bucket = i;
     }
-    bcache.hash_heads[index] = b;
   }
-  release(&bcache.bucket_locks[index]);  // 释放桶的锁
+  
+  return selected_bucket;  // 返回拥有最多空闲块的桶索引
 }
 
+// 从指定的富有桶中“偷”一半缓冲块到目标桶
+static int
+steal_buffers(int target_bucket, int donor_bucket)
+{
+  if(donor_bucket < 0) return 0;  // 如果没有富有桶，则返回 0
+  
+  acquire(&bcache.lock[donor_bucket]);
+  int buffers_to_steal = bcache.freelist[donor_bucket] / 2;  // 计算要“偷”的块数量
+  
+  if(buffers_to_steal > 0) {
+    bcache.freelist[target_bucket] += buffers_to_steal;
+    bcache.freelist[donor_bucket] -= buffers_to_steal;
+    
+    for(int i = 0; i < buffers_to_steal; i++) {
+      struct buf *stolen_buffer = remove_lru(&bcache.bucket[donor_bucket]);
+      if(stolen_buffer)
+        insert_tail(&bcache.bucket[target_bucket], stolen_buffer);  // 插入到目标桶的尾部
+    }
+  }
+  
+  release(&bcache.lock[donor_bucket]);
+  return buffers_to_steal;
+}
 
-// 获取指定块的缓冲区，或者从其他桶获取未使用的缓冲区
-static struct buf* bget(uint dev, uint blockno) {
-  int index = hash(dev, blockno);  // 计算哈希桶索引
+// 缓冲区缓存初始化
+void
+binit(void)
+{
   struct buf *b;
 
-  acquire(&bcache.bucket_locks[index]);  // 获取当前桶的锁
-
-  // 查找块是否已缓存
-  for (b = bcache.hash_heads[index]; b != 0; b = b->next) {
-    if (b->dev == dev && b->blockno == blockno) {
-      b->refcnt++;
-      release(&bcache.bucket_locks[index]);
-      acquiresleep(&b->lock);
-      return b;
-    }
-  }
-  release(&bcache.bucket_locks[index]);  // 没有找到时释放锁
-
-  // 查找未使用的缓冲区
-  for (int i = 0; i < NHASH; i++) {
-    acquire(&bcache.bucket_locks[i]);  // 获取其他桶的锁
-    for (b = bcache.hash_heads[i]; b != 0; b = b->next) {
-      if (b->refcnt == 0) {  // 找到未使用的块
-        // 从旧桶中移除
-        if (b->prev) b->prev->next = b->next;
-        if (b->next) b->next->prev = b->prev;
-        if (bcache.hash_heads[i] == b) bcache.hash_heads[i] = b->next;
-
-        release(&bcache.bucket_locks[i]);  // 释放旧桶的锁
-
-        // 将块移入目标桶
-        acquire(&bcache.bucket_locks[index]);
-        b->dev = dev;
-        b->blockno = blockno;
-        b->valid = 0;
-        b->refcnt = 1;
-        b->next = bcache.hash_heads[index];
-        b->prev = 0;
-        if (bcache.hash_heads[index] != 0) {
-          bcache.hash_heads[index]->prev = b;
-        }
-        bcache.hash_heads[index] = b;
-        release(&bcache.bucket_locks[index]);  // 释放目标桶的锁
-
-        acquiresleep(&b->lock);
-        return b;
-      }
-    }
-    release(&bcache.bucket_locks[i]);  // 释放其他桶的锁
+  // 初始化每个桶的锁和链表
+  for(int i = 0; i < NBUCKETS; i++) {
+    initlock(&bcache.lock[i], "bcache");
+    bcache.bucket[i].next = &bcache.bucket[i];
+    bcache.bucket[i].prev = &bcache.bucket[i];
+    bcache.freelist[i] = 0;
   }
 
-  panic("bget: no buffers available");
+  // 将缓存块均匀分配到各个桶中
+  for(b = bcache.buf; b < bcache.buf + NBUF; b++) {
+    int bucket_index = (b - bcache.buf) % NBUCKETS;
+    initsleeplock(&b->lock, "buffer");
+    insert_head(&bcache.bucket[bucket_index], b);  // 将块插入对应桶的头部
+    bcache.freelist[bucket_index]++;
+  }
 }
 
-// 从磁盘读取块内容
-struct buf* bread(uint dev, uint blockno) {
-  struct buf *b = bget(dev, blockno);
-  if (!b->valid) {
-    virtio_disk_rw(b, 0);
+// 获取一个缓冲区
+static struct buf*
+bget(uint dev, uint blockno)
+{
+  struct buf *buffer;
+  int target_bucket = hash(dev, blockno);
+  
+  acquire(&bcache.lock[target_bucket]);
+
+  // 在目标桶中查找块
+  for(buffer = bcache.bucket[target_bucket].next; buffer != &bcache.bucket[target_bucket]; buffer = buffer->next) {
+    if(buffer->dev == dev && buffer->blockno == blockno) {  // 找到目标块
+      buffer->refcnt++;
+      bcache.freelist[target_bucket] -= (buffer->refcnt == 1);  // 减少空闲块数量
+      release(&bcache.lock[target_bucket]);
+      acquiresleep(&buffer->lock);
+      return buffer;
+    }
+  }
+
+  // 如果当前桶没有空闲块，从其他桶偷一半
+  if(bcache.freelist[target_bucket] == 0) {
+    int donor = find_richest_bucket();
+    if(donor < 0 || steal_buffers(target_bucket, donor) == 0) {
+      panic("bget: no buffers");
+    }
+  }
+
+  // 分配一个空闲块
+  for(buffer = bcache.bucket[target_bucket].prev; buffer != &bcache.bucket[target_bucket]; buffer = buffer->prev) {
+    if(buffer->refcnt == 0) {  // 找到空闲块
+      buffer->dev = dev;
+      buffer->blockno = blockno;
+      buffer->valid = 0;
+      buffer->refcnt = 1;
+      bcache.freelist[target_bucket]--;  // 更新空闲列表
+      release(&bcache.lock[target_bucket]);
+      acquiresleep(&buffer->lock);
+      return buffer;
+    }
+  }
+
+  panic("bget: no buffers");
+}
+
+// 读取指定的块内容
+struct buf*
+bread(uint dev, uint blockno)
+{
+  struct buf *b;
+
+  b = bget(dev, blockno);
+  if(!b->valid) {
+    virtio_disk_rw(b, 0);  // 如果无效，则从磁盘读取
     b->valid = 1;
   }
   return b;
 }
 
 // 将缓冲区内容写回磁盘
-void bwrite(struct buf *b) {
-  if (!holdingsleep(&b->lock))
+void
+bwrite(struct buf *b)
+{
+  if(!holdingsleep(&b->lock))
     panic("bwrite");
-  virtio_disk_rw(b, 1);
+  virtio_disk_rw(b, 1);  // 写回磁盘
 }
 
-void bpin(struct buf *b) {
-  int index = hash(b->dev, b->blockno);
+// 释放缓冲区
+void
+brelse(struct buf *b)
+{
+  if(!holdingsleep(&b->lock))
+    panic("brelse");
 
-  acquire(&bcache.bucket_locks[index]);
-  b->refcnt++;  // 原子性增加引用计数
-  release(&bcache.bucket_locks[index]);
+  releasesleep(&b->lock);
+
+  int bucket_index = hash(b->dev, b->blockno);
+  acquire(&bcache.lock[bucket_index]);
+  
+  b->refcnt--;  // 引用计数减 1
+  if(b->refcnt == 0) {  // 如果没有进程引用该块
+    // 将释放的块移到链表头部（最近使用）
+    b->next->prev = b->prev;
+    b->prev->next = b->next;
+    insert_head(&bcache.bucket[bucket_index], b);
+    bcache.freelist[bucket_index]++;  // 增加空闲块数量
+  }
+  
+  release(&bcache.lock[bucket_index]);
 }
 
-void bunpin(struct buf *b) {
-  int index = hash(b->dev, b->blockno);
+// 增加缓冲区的引用计数，防止被回收
+void
+bpin(struct buf *b)
+{
+  int bucket_index = hash(b->dev, b->blockno);
+  acquire(&bcache.lock[bucket_index]);
+  b->refcnt++;
+  release(&bcache.lock[bucket_index]);
+}
 
-  acquire(&bcache.bucket_locks[index]);
-  if (b->refcnt <= 0)
-    panic("bunpin: refcnt underflow");  // 检查引用计数有效性
-  b->refcnt--;  // 原子性减少引用计数
-  release(&bcache.bucket_locks[index]);
+// 减少缓冲区的引用计数，允许其被回收
+void
+bunpin(struct buf *b)
+{
+  int bucket_index = hash(b->dev, b->blockno);
+  acquire(&bcache.lock[bucket_index]);
+  b->refcnt--;
+  release(&bcache.lock[bucket_index]);
 }

@@ -1,3 +1,6 @@
+// 物理内存分配器，用于用户进程、内核栈、页表页和管道缓冲区。
+// 该分配器按 4096 字节（一个页）的单位分配内存。
+
 #include "types.h"
 #include "param.h"
 #include "memlayout.h"
@@ -5,91 +8,120 @@
 #include "riscv.h"
 #include "defs.h"
 
+void free_memory_range(void *start_addr, void *end_addr);
 
-void freerange(void *pa_start, void *pa_end);
+extern char end[]; // 内核结束后的第一个地址，由 kernel.ld 定义。
 
-extern char end[]; // first address after kernel, defined by kernel.ld.
-
-// 结构体定义：表示一个内存块
+// run 结构体用于描述一个空闲的内存块
 struct run {
   struct run *next; // 指向下一个空闲块的指针
 };
 
-// 每个 CPU 的内存管理结构
+// kmem 结构体，用于管理一个内核内存分配链表
 struct {
-  struct spinlock lock; // 自旋锁，保护此 CPU 的内存链表
-  struct run *freelist; // 此 CPU 的空闲内存链表头指针
-} kmem[NCPU]; // 数组，存储每个 CPU 的内存管理结构
+  struct spinlock lock;    // 自旋锁，保护链表的并发访问
+  struct run *freelist;    // 指向空闲内存块链表的头指针
+} kmem;
+
+// 每个 CPU 拥有一个独立的 kmems 分配链表，用于减少锁竞争
+struct {
+  struct spinlock lock;    // 自旋锁，保护每个 CPU 的链表
+  struct run *freelist;    // 指向该 CPU 空闲内存块的链表头指针
+} kmems[NCPU];
 
 // 初始化内存分配器
-void kinit() {
-  for (int i = 0; i < NCPU; i++) {
-    initlock(&kmem[i].lock, "kmem"); // 初始化每个 CPU 的自旋锁
-    kmem[i].freelist = 0; // 初始化空闲链表为空
+void
+kinit()
+{ 
+  // 初始化每个 CPU 的自旋锁
+  for(int i = 0; i < NCPU; i++) {
+    initlock(&kmems[i].lock, "kmem");
   }
-  freerange(end, (void*)PHYSTOP); // 设置可用内存范围
+  // 初始化空闲内存块链表，范围从 `end` 到物理内存上限 PHYSTOP
+  free_memory_range(end, (void*)PHYSTOP);
 }
 
-// 设置可用的内存范围，逐页释放内存
-void freerange(void *pa_start, void *pa_end) {
-  char *p;
-  p = (char*)PGROUNDUP((uint64)pa_start);
-  for (; p + PGSIZE <= (char*)pa_end; p += PGSIZE)
-    kfree(p); // 调用kfree释放页面
+// 将指定范围内的物理地址（起始地址到结束地址）划分为 4096 字节的块并释放
+void
+free_memory_range(void *start_addr, void *end_addr)
+{
+  char *page_addr;
+  // 将起始地址向上对齐到页边界
+  page_addr = (char*)PGROUNDUP((uint64)start_addr);
+  // 遍历所有 4096 字节的页，并将它们逐一释放
+  for(; page_addr + PGSIZE <= (char*)end_addr; page_addr += PGSIZE)
+    kfree(page_addr);  // 释放页
 }
 
-// 释放指向的物理内存页面v
-void kfree(void *pa) {
-  struct run *r;
+// 释放由 pa 指向的物理内存页
+// 通常，应该是由 kalloc() 分配的内存，
+// 但在初始化时，分配器可以直接调用 kfree()
+void
+kfree(void *page_addr)
+{
+  struct run *free_block;
 
-  // 检查地址是否有效
-  if (((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
+  // 检查地址有效性，确保它是页对齐的、在内核结束后并且在物理内存上限之内
+  if(((uint64)page_addr % PGSIZE) != 0 || (char*)page_addr < end || (uint64)page_addr >= PHYSTOP)
     panic("kfree");
 
-  memset(pa, 1, PGSIZE); // 填充内存以捕获悬空引用
+  // 将释放的内存填充为 1，方便调试时检测悬空引用
+  memset(page_addr, 1, PGSIZE);
 
-  r = (struct run*)pa; // 将地址转换为run结构
+  free_block = (struct run*)page_addr;
 
-  int cpu_id = cpuid(); // 获取当前 CPU ID
-  acquire(&kmem[cpu_id].lock); // 获取当前 CPU 的自旋锁
-  r->next = kmem[cpu_id].freelist; // 将当前页面插入到本 CPU 的空闲链表
-  kmem[cpu_id].freelist = r; // 更新链表头
-  release(&kmem[cpu_id].lock); // 释放自旋锁
+  // 获取当前 CPU ID，并关闭中断防止调度切换
+  push_off();
+  int current_cpu = cpuid();
+  // 锁住当前 CPU 的空闲链表，防止并发修改
+  acquire(&kmems[current_cpu].lock);
+  // 将释放的块添加到当前 CPU 的空闲链表头
+  free_block->next = kmems[current_cpu].freelist;
+  kmems[current_cpu].freelist = free_block;
+  // 释放锁
+  release(&kmems[current_cpu].lock);
+  // 恢复中断状态
+  pop_off();
 }
 
-// 分配一页4096字节的物理内存。
-// 如果当前 CPU 的链表不足，则尝试从其他链表窃取内存块。
-void *kalloc(void) {
-  struct run *r;
+// 分配一个 4096 字节大小的物理内存页
+// 返回指向该内存页的指针，内核可以使用该地址
+// 如果分配失败，则返回 0
+void *
+kalloc(void)
+{
+  struct run *allocated_block;
 
-  int cpu_id = cpuid(); // 获取当前 CPU ID
-  acquire(&kmem[cpu_id].lock); // 获取当前 CPU 的自旋锁
+  // 获取当前 CPU ID，并关闭中断以防止切换
+  push_off();
+  int current_cpu = cpuid();
+  // 锁住当前 CPU 的空闲链表
+  acquire(&kmems[current_cpu].lock);
+  // 从当前 CPU 的空闲链表中获取一个空闲块
+  allocated_block = kmems[current_cpu].freelist;
+  if(allocated_block)
+    kmems[current_cpu].freelist = allocated_block->next;  // 更新链表头指针
+  release(&kmems[current_cpu].lock);
 
-  // 尝试从当前 CPU 的链表获取内存块
-  r = kmem[cpu_id].freelist; 
-  if (r) {
-    kmem[cpu_id].freelist = r->next; // 更新链表头，移除已分配的页面
-    release(&kmem[cpu_id].lock); // 释放自旋锁
-    memset((char*)r, 5, PGSIZE); // 将分配的内存填充为5（用于调试）
-    return (void*)r; // 返回分配的内存指针
-  }
-
-  // 如果当前链表为空，则尝试从其他 CPU 的链表窃取内存
-  release(&kmem[cpu_id].lock); // 释放当前 CPU 的自旋锁
-
-  // 尝试窃取其他 CPU 的内存
-  for (int i = 0; i < NCPU; i++) {
-    if (i == cpu_id) continue; // 不要尝试从自己这里窃取
-    acquire(&kmem[i].lock); // 获取其他 CPU 的自旋锁
-    r = kmem[i].freelist; // 获取其他 CPU 的空闲链表头
-    if (r) {
-      kmem[i].freelist = r->next; // 移除已分配的页面
-      release(&kmem[i].lock); // 释放其他 CPU 的自旋锁
-      memset((char*)r, 5, PGSIZE); // 将分配的内存填充为5（用于调试）
-      return (void*)r; // 返回窃取的内存指针
+  // 如果当前 CPU 没有空闲块，从其他 CPU 的链表中尝试分配
+  if(!allocated_block) {
+    for(int i = 0; i < NCPU; i++) {
+      if(i == current_cpu) continue;  // 跳过当前 CPU
+      acquire(&kmems[i].lock);
+      allocated_block = kmems[i].freelist;
+      if(allocated_block) {
+        kmems[i].freelist = allocated_block->next;  // 更新链表头指针
+        release(&kmems[i].lock);
+        break;
+      }
+      release(&kmems[i].lock);
     }
-    release(&kmem[i].lock); // 释放其他 CPU 的自旋锁
   }
+  // 恢复中断状态
+  pop_off();
 
-  return 0; // 如果没有可用内存，返回0
+  // 如果成功分配到内存，则将内存填充为 5，用于调试
+  if(allocated_block)
+    memset((char*)allocated_block, 5, PGSIZE); // 填充内存
+  return (void*)allocated_block;
 }

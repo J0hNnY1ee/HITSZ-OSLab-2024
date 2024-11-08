@@ -1,0 +1,171 @@
+#!/usr/bin/env python
+
+import re
+from gradelib import *
+
+r = Runner(save("xv6.out"))
+
+@test(5, "sleep, no arguments")
+def test_sleep_no_args():
+    r.run_qemu(shell_script([
+        'sleep'
+    ]))
+    r.match(no=["exec .* failed", "$ sleep\n$"])
+
+@test(5, "sleep, returns")
+def test_sleep_no_args():
+    r.run_qemu(shell_script([
+        'sleep',
+        'echo OK'
+    ]))
+    r.match('^OK$', no=["exec .* failed", "$ sleep\n$"])
+
+@test(10, "sleep, makes syscall")
+def test_sleep():
+    r.run_qemu(shell_script([
+        'sleep 10',
+        'echo FAIL'
+    ]), stop_breakpoint('sys_sleep'))
+    r.match('\\$ sleep 10', no=['FAIL'])
+
+@test(10, "pingpong lenient testing")
+def test_pingpong():
+    r.run_qemu(shell_script([
+        'pingpong', 'echo OK'
+    ]))
+    r.match('^\\d+: received ping from pid \\d+$', '^\\d+: received pong from pid \\d+$', '^OK$')
+
+@test(10, "pingpong strict testing with changing pids")
+def test_pingpong_strict_pid_change():
+    def strict_match(line):
+        """Regular expression to match ping/pong lines and capture process IDs"""
+        match_ping = re.match(r'^(\d+): received ping from pid (\d+)$', line)
+        match_pong = re.match(r'^(\d+): received pong from pid (\d+)$', line)
+        
+        if match_ping:
+            pid1, pid2 = match_ping.groups()
+            return (int(pid1), int(pid2))  # Return the captured process IDs
+            
+        elif match_pong:
+            pid1, pid2 = match_pong.groups()
+            return (int(pid1), int(pid2))  # Return the captured process IDs
+        
+        return None
+
+    # Run QEMU and execute pingpong three times
+    r.run_qemu(shell_script([
+        'pingpong', 'pingpong', 'pingpong', 'echo OK'
+    ]))
+
+    # Clean the output, remove ANSI color codes, and filter valid lines
+    clean_lines = []
+    for line in r.qemu.output.splitlines():
+        line = re.sub(r'\x1b\[[0-9;]*m', '', line)  # Remove color codes
+        if re.match(r'^\d+: received (ping|pong) from pid \d+$', line) or re.match(r'^OK$', line):
+            clean_lines.append(line)
+
+    # Initialize variables to store previous process IDs
+    prev_ping_pid = None
+    prev_pong_pid = None
+
+    # Iterate through each run, two lines per run
+    for i in range(0, len(clean_lines) - 2, 2):
+        # Get the ping and pong lines
+        ping_match = strict_match(clean_lines[i])
+        pong_match = strict_match(clean_lines[i+1])
+
+        # Check if the format matches
+        assert ping_match and pong_match, "Ping/Pong output format mismatch"
+        
+        # Get the process IDs for the current run
+        ping_pid, pong_pid = ping_match[0], ping_match[1]
+
+        # Check if the process IDs match
+        assert ping_pid == pong_match[1], f"PID mismatch: {ping_pid} != {pong_match[1]}"
+        assert pong_pid == pong_match[0], f"PID mismatch: {pong_pid} != {pong_match[0]}"
+
+        # Check if the process IDs are different from the previous run
+        if prev_ping_pid is not None and prev_pong_pid is not None:
+            assert ping_pid != prev_ping_pid and pong_pid != prev_pong_pid, \
+                "Process IDs did not change between runs"
+
+        # Store the current process IDs for comparison in the next run
+        prev_ping_pid, prev_pong_pid = ping_pid, pong_pid
+
+    # Finally, match the echo OK output
+    assert clean_lines[-1] == 'OK', "Final OK message missing"
+
+@test(5, "find, in current directory and create a file")
+def test_find_file_curdir():
+    fn = random_str()
+    r.run_qemu(shell_script([
+        'echo > %s' % fn,
+        'find . %s' % fn
+    ]))
+    r.match('./%s' % fn)
+
+@test(5, "find, in current directory and create a dir")
+def test_find_dir_curdir():
+    fn = random_str()
+    r.run_qemu(shell_script([
+        'mkdir %s' % fn,
+        'find . %s' % fn
+    ]))
+    r.match('./%s' % fn)
+
+@test(5, "find, find file recursive")
+def test_find_file_recursive():
+    needle = random_str()
+    dirs = [random_str() for _ in range(3)]
+    r.run_qemu(shell_script([
+        'mkdir %s' % dirs[0],
+        'echo > %s/%s' % (dirs[0], needle),
+        'mkdir %s/%s' % (dirs[0], dirs[1]),
+        'echo > %s/%s/%s' % (dirs[0], dirs[1], needle),
+        'mkdir %s' % dirs[2],
+        'echo > %s/%s' % (dirs[2], needle),
+        'find . %s' % needle
+    ]))
+    r.match('./%s/%s' % (dirs[0], needle),
+            './%s/%s/%s' % (dirs[0], dirs[1], needle),
+            './%s/%s' % (dirs[2], needle))
+    
+@test(5, "find, find dir recursive with no duplicates")
+def test_find_recursive_no_duplicates():
+    needle = random_str()
+    dirs = [random_str() for _ in range(3)]
+    
+    r.run_qemu(shell_script([
+        'mkdir %s' % dirs[0],
+        'echo > %s/%s' % (dirs[0], needle),
+        'mkdir %s/%s' % (dirs[0], dirs[1]),
+        'mkdir %s/%s/%s' % (dirs[0], dirs[1], needle),
+        'mkdir %s' % dirs[2],
+        'echo > %s/%s' % (dirs[2], needle),
+        'find . %s' % needle
+    ]))
+
+    expected_lines = [
+        './%s/%s' % (dirs[0], needle),
+        './%s/%s/%s' % (dirs[0], dirs[1], needle),
+        './%s/%s' % (dirs[2], needle)
+    ]
+
+    output_lines = r.qemu.output.splitlines()
+
+    clean_lines = []
+    for line in output_lines:
+        line = re.sub(r'\x1b\[[0-9;]*m', '', line)  
+        if re.match(r'^\./.*$', line):  
+            clean_lines.append(line)
+
+    unique_clean_lines = list(set(clean_lines))
+
+    for expected in expected_lines:
+        assert expected in unique_clean_lines, "Expected path '%s' not found in output" % expected
+
+    assert len(clean_lines) == len(expected_lines), \
+        "Expected %d unique lines, but found %d" % (len(expected_lines), len(unique_clean_lines))
+
+
+run_tests()

@@ -19,25 +19,6 @@ struct bcache {
   int freelist[NBUCKETS];             // 每个桶的空闲块数量
 } bcache;
 
-// 链表操作辅助函数：将节点插入链表头部
-static void
-insert_head(struct buf *head, struct buf *node)
-{
-  node->next = head->next;
-  node->prev = head;
-  head->next->prev = node;
-  head->next = node;
-}
-
-// 链表操作辅助函数：将节点插入链表尾部
-static void
-insert_tail(struct buf *head, struct buf *node)
-{
-  node->next = head;
-  node->prev = head->prev;
-  head->prev->next = node;
-  head->prev = node;
-}
 
 // 从链表中移除最近最少使用的节点（从链表尾部开始查找）
 // 返回找到的空闲节点，如果没有找到空闲节点，则返回 0
@@ -55,12 +36,6 @@ remove_lru(struct buf *head)
   return 0;
 }
 
-// 哈希函数，用于计算块在哈希桶中的索引
-static uint
-hash(uint dev, uint blockno)
-{
-  return blockno % NBUCKETS;  // 使用块号对桶数量取模
-}
 
 // 选择拥有最多空闲缓冲块的桶
 static int
@@ -79,7 +54,6 @@ find_richest_bucket(void)
   return selected_bucket;  // 返回拥有最多空闲块的桶索引
 }
 
-// 从指定的富有桶中“偷”一半缓冲块到目标桶
 static int
 steal_buffers(int target_bucket, int donor_bucket)
 {
@@ -95,7 +69,12 @@ steal_buffers(int target_bucket, int donor_bucket)
     for(int i = 0; i < buffers_to_steal; i++) {
       struct buf *stolen_buffer = remove_lru(&bcache.bucket[donor_bucket]);
       if(stolen_buffer)
-        insert_tail(&bcache.bucket[target_bucket], stolen_buffer);  // 插入到目标桶的尾部
+        {
+          stolen_buffer->next = &bcache.bucket[target_bucket];
+          stolen_buffer->prev = bcache.bucket[target_bucket].prev;
+          bcache.bucket[target_bucket].prev->next = stolen_buffer;
+          bcache.bucket[target_bucket].prev = stolen_buffer; 
+          } // 插入到目标桶的尾部
     }
   }
   
@@ -121,7 +100,10 @@ binit(void)
   for(b = bcache.buf; b < bcache.buf + NBUF; b++) {
     int bucket_index = (b - bcache.buf) % NBUCKETS;
     initsleeplock(&b->lock, "buffer");
-    insert_head(&bcache.bucket[bucket_index], b);  // 将块插入对应桶的头部
+    b->next = bcache.bucket[bucket_index].next;
+    b->prev = &bcache.bucket[bucket_index];
+    bcache.bucket[bucket_index].next->prev = b;
+    bcache.bucket[bucket_index].next = b;  // 将块插入对应桶的头部
     bcache.freelist[bucket_index]++;
   }
 }
@@ -131,7 +113,7 @@ static struct buf*
 bget(uint dev, uint blockno)
 {
   struct buf *buffer;
-  int target_bucket = hash(dev, blockno);
+  int target_bucket = blockno% NBUCKETS;
   
   acquire(&bcache.lock[target_bucket]);
 
@@ -203,7 +185,7 @@ brelse(struct buf *b)
 
   releasesleep(&b->lock);
 
-  int bucket_index = hash(b->dev, b->blockno);
+  int bucket_index =  b->blockno % NBUCKETS;
   acquire(&bcache.lock[bucket_index]);
   
   b->refcnt--;  // 引用计数减 1
@@ -211,7 +193,10 @@ brelse(struct buf *b)
     // 将释放的块移到链表头部（最近使用）
     b->next->prev = b->prev;
     b->prev->next = b->next;
-    insert_head(&bcache.bucket[bucket_index], b);
+    b->next = bcache.bucket[bucket_index].next;
+    b->prev = &bcache.bucket[bucket_index];
+    bcache.bucket[bucket_index].next->prev = b;
+    bcache.bucket[bucket_index].next = b;
     bcache.freelist[bucket_index]++;  // 增加空闲块数量
   }
   
@@ -222,7 +207,7 @@ brelse(struct buf *b)
 void
 bpin(struct buf *b)
 {
-  int bucket_index = hash(b->dev, b->blockno);
+  int bucket_index = b->blockno% NBUCKETS;
   acquire(&bcache.lock[bucket_index]);
   b->refcnt++;
   release(&bcache.lock[bucket_index]);
@@ -232,7 +217,7 @@ bpin(struct buf *b)
 void
 bunpin(struct buf *b)
 {
-  int bucket_index = hash(b->dev, b->blockno);
+  int bucket_index = b->blockno% NBUCKETS;
   acquire(&bcache.lock[bucket_index]);
   b->refcnt--;
   release(&bcache.lock[bucket_index]);

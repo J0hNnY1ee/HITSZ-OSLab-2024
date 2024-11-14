@@ -180,6 +180,11 @@ int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
 int             test_pagetable();
 void            vmprint(pagetable_t pgtbl);
+pagetable_t proc_kernel_pagetables_init();
+void proc_kvmmmap(pagetable_t k_pagetable, uint64 va, uint64 pa, uint64 sz, int perm);
+void proc_kvminithart(pagetable_t k_pagetable);
+void free_proc_k_pagetable(pagetable_t k_pagetable);
+void sync_pagetable(pagetable_t pagetable, pagetable_t k_pagetable, uint64 oldsz, uint64 newsz);
 // plic.c
 void            plicinit(void);
 void            plicinithart(void);
@@ -194,8 +199,10 @@ void            virtio_disk_intr(void);
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))
 
-
-
+// vmcopyin.c
+int copyin_new(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len);
+int statscopyin(char *buf, int sz);
+int copyinstr_new(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max);
 // stats.c
 void            statsinit(void);
 void            statsinc(void);

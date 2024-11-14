@@ -110,7 +110,12 @@ found:
     release(&p->lock);
     return 0;
   }
-
+  p->k_pagetable = proc_kernel_pagetables_init();
+  char *pa = kalloc();
+  if (pa == 0) panic("kalloc");
+  uint64 va = KSTACK((int)(p - proc));
+  proc_kvmmmap(p->k_pagetable, va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
+  p->kstack = va;
   // Set up new context to start executing at forkret,
   // which returns to user space.
   memset(&p->context, 0, sizeof(p->context));
@@ -128,6 +133,10 @@ static void freeproc(struct proc *p) {
   p->trapframe = 0;
   if (p->pagetable) proc_freepagetable(p->pagetable, p->sz);
   p->pagetable = 0;
+  if (p->kstack) uvmunmap(p->k_pagetable, p->kstack, 1, 1);
+  p->kstack = 0;
+
+  free_proc_k_pagetable(p->k_pagetable);
   p->sz = 0;
   p->pid = 0;
   p->parent = 0;
@@ -192,7 +201,7 @@ void userinit(void) {
   // and data into it.
   uvminit(p->pagetable, initcode, sizeof(initcode));
   p->sz = PGSIZE;
-
+  sync_pagetable(p->pagetable,p->k_pagetable,0,p->sz);
   // prepare for the very first "return" from kernel to user.
   p->trapframe->epc = 0;      // user program counter
   p->trapframe->sp = PGSIZE;  // user stack pointer
@@ -213,9 +222,13 @@ int growproc(int n) {
 
   sz = p->sz;
   if (n > 0) {
+    if(PGROUNDUP(sz+n) >= PLIC){
+      return -1;
+    }
     if ((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
       return -1;
     }
+    sync_pagetable(p->pagetable,p->k_pagetable,sz-n,sz);
   } else if (n < 0) {
     sz = uvmdealloc(p->pagetable, sz, sz + n);
   }
@@ -242,7 +255,7 @@ int fork(void) {
     return -1;
   }
   np->sz = p->sz;
-
+  sync_pagetable(np->pagetable,np->k_pagetable,0,np->sz);
   np->parent = p;
 
   // copy saved user registers.
@@ -430,8 +443,10 @@ void scheduler(void) {
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
-        swtch(&c->context, &p->context);
 
+        proc_kvminithart(p->k_pagetable);
+        swtch(&c->context, &p->context);
+        kvminithart();
         // Process is done running for now.
         // It should have changed its p->state before coming back.
         c->proc = 0;

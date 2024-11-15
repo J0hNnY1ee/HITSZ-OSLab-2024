@@ -518,13 +518,6 @@ pte_t *pte_from;
     if((pte_to = walk(k_pagetable, i, 1)) == 0){
       panic("u2k_vmcopy: pte walk fail");
     }
-    // 在内核模式下，无法访问设置了PTE_U的页面,
-    // 所以接下来要获得pagetable中虚拟地址为i的pte的标志位
-    
-    // uint64 pa = PTE2PA(*pte_from);
-    // uint flags = (PTE_FLAGS(*pte_from)) & (~PTE_U);
-    // *pte_to = PA2PTE(pa) | flags;
-    // 感觉上面三句有点多，改成一句
     *pte_to = (*pte_from) & (~PTE_U);
   }
 }

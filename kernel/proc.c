@@ -416,6 +416,8 @@ int wait(uint64 addr) {
     // Wait for a child to exit.
     sleep(p, &p->lock);  // DOC: wait-sleep
   }
+
+  
 }
 
 // Per-CPU process scheduler.

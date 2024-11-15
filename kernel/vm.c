@@ -243,6 +243,20 @@ void freewalk(pagetable_t pagetable) {
     }
   }
   kfree((void *)pagetable);
+  // for (uint64 i = 0; i < 512; ++i) {
+  //   pte_t pte = pagetable[i];
+  //   if (pte & PTE_V) {
+  //     pagetable_t sub = (pagetable_t)PTE2PA(pte);
+  //     for (uint64 j = 0; j < 512; ++j) {
+  //       if (sub[j] & PTE_V) {
+  //         uint64 va = ((i << 18) | (j << 9)) << 12;
+  //         if (va >= PLIC) kfree((void *)PTE2PA(sub[j]));
+  //       }
+  //     }
+  //     kfree((void *)sub);
+  //   }
+  // }
+  // kfree((void *)pagetable);
 }
 
 // Free user memory pages,
@@ -335,7 +349,7 @@ int copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len) {
   // return 0;
 
   w_sstatus(r_sstatus() | SSTATUS_SUM);
-  int ret =  copyin_new(pagetable, dst, srcva, len);
+  int ret = copyin_new(pagetable, dst, srcva, len);
   w_sstatus(r_sstatus() & ~SSTATUS_SUM);
   return ret;
 }
@@ -378,7 +392,7 @@ int copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max) {
   //   return -1;
   // }
   w_sstatus(r_sstatus() | SSTATUS_SUM);
-  int ret =  copyinstr_new(pagetable, dst, srcva, max);
+  int ret = copyinstr_new(pagetable, dst, srcva, max);
   w_sstatus(r_sstatus() & ~SSTATUS_SUM);
   return ret;
 }
@@ -490,41 +504,66 @@ void proc_kvminithart(pagetable_t k_pagetable) {
 // 参考freewalk
 void free_proc_k_pagetable(pagetable_t k_pagetable) {
   // there are 2^9 = 512 PTEs in a page table.
-  for (int i = 0; i < 512; i++) {
+  // for (int i = 0; i < 512; i++) {
+  //   pte_t pte = k_pagetable[i];
+  //   if (pte & PTE_V) {
+  //     // this PTE points to a lower-level page table.
+  //     uint64 child = PTE2PA(pte);
+  //     k_pagetable[i] = 0;
+  //     if ((pte & (PTE_R | PTE_W | PTE_X)) == 0) {
+  //       free_proc_k_pagetable((pagetable_t)child);
+  //     }
+  //   }
+  // }
+  // kfree((void *)k_pagetable);
+
+
+    for (uint64 i = 0; i < 512; ++i) {
     pte_t pte = k_pagetable[i];
     if (pte & PTE_V) {
-      // this PTE points to a lower-level page table.
-      uint64 child = PTE2PA(pte);
-      k_pagetable[i] = 0;
-      if ((pte & (PTE_R | PTE_W | PTE_X)) == 0) {
-        free_proc_k_pagetable((pagetable_t)child);
+      pagetable_t sub = (pagetable_t)PTE2PA(pte);
+      for (uint64 j = 0; j < 512; ++j) {
+        if (sub[j] & PTE_V) {
+          uint64 va = ((i << 18) | (j << 9)) << 12;
+          if (va >= PLIC) kfree((void *)PTE2PA(sub[j]));
+        }
       }
+      kfree((void *)sub);
     }
   }
   kfree((void *)k_pagetable);
 }
 
+pte_t *walk_modified(pagetable_t pagetable, uint64 va, int alloc) {
+  if (va >= MAXVA) panic("walk");
+  int level = 2;
+  pte_t *pte = &pagetable[PX(level, va)];
+  if (*pte & PTE_V) {
+    pagetable = (pagetable_t)PTE2PA(*pte);
+  } else {
+    if (!alloc || (pagetable = (pde_t *)kalloc()) == 0) return 0;
+    memset(pagetable, 0, PGSIZE);
+    *pte = PA2PTE(pagetable) | PTE_V;
+  }
+  return &pagetable[PX(1, va)];
+}
+
 // assignment 3
 void sync_pagetable(pagetable_t pagetable, pagetable_t k_pagetable, uint64 oldsz, uint64 newsz) {
-pte_t *pte_from;
+  pte_t *pte_from;
   pte_t *pte_to;
   oldsz = PGROUNDUP(oldsz);
 
-  for(uint64 i = oldsz; i < newsz; i += PGSIZE){
+  for (uint64 i = oldsz; i < newsz; i += PGSIZE) {
+    if(i >= PLIC) {
+      break;
+    }
     // 对页表pagetable中虚拟地址为i进行检查，检查pte是否存在
-    if((pte_from = walk(pagetable, i, 0)) == 0)
-      panic("u2k_vmcopy: pte should exist");
+    if ((pte_from = walk_modified(pagetable, i, 0)) == 0) panic("u2k_vmcopy: pte should exist");
     // 对内核页表k_pagetable中虚拟地址为i进行检查，检查pte是否存在，若不存在则申请物理内存并映射。
-    if((pte_to = walk(k_pagetable, i, 1)) == 0){
+    if ((pte_to = walk_modified(k_pagetable, i, 1)) == 0) {
       panic("u2k_vmcopy: pte walk fail");
     }
-    // 在内核模式下，无法访问设置了PTE_U的页面,
-    // 所以接下来要获得pagetable中虚拟地址为i的pte的标志位
-    
-    // uint64 pa = PTE2PA(*pte_from);
-    // uint flags = (PTE_FLAGS(*pte_from)) & (~PTE_U);
-    // *pte_to = PA2PTE(pa) | flags;
-    // 感觉上面三句有点多，改成一句
     *pte_to = (*pte_from) & (~PTE_U);
   }
 }

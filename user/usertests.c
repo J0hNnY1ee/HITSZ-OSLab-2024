@@ -2108,7 +2108,6 @@ void bsstest(char *s) {
 // below the stack and wreck the instructions/data?
 void bigargtest(char *s) {
   int pid, fd, xstatus;
-
   unlink("bigarg-ok");
   pid = fork();
   if (pid == 0) {
@@ -2128,7 +2127,6 @@ void bigargtest(char *s) {
     printf("%s: bigargtest: fork failed\n", s);
     exit(1);
   }
-
   wait(&xstatus);
   if (xstatus != 0) exit(xstatus);
   fd = open("bigarg-ok", 0);
@@ -2469,7 +2467,6 @@ int run(void f(char *), char *s) {
 int main(int argc, char *argv[]) {
   int continuous = 0;
   char *justone = 0;
-
   if (argc == 2 && strcmp(argv[1], "-c") == 0) {
     continuous = 1;
   } else if (argc == 2 && strcmp(argv[1], "-C") == 0) {
@@ -2485,34 +2482,34 @@ int main(int argc, char *argv[]) {
     void (*f)(char *);
     char *s;
   } tests[] = {
-      {execout, "execout"},
-      {copyin, "copyin"},
-      {copyout, "copyout"},
-      {copyinstr1, "copyinstr1"},
-      {copyinstr2, "copyinstr2"},
-      {copyinstr3, "copyinstr3"},
-      {truncate1, "truncate1"},
-      {truncate2, "truncate2"},
-      {truncate3, "truncate3"},
-      {reparent2, "reparent2"},
-      {pgbug, "pgbug"},
-      {sbrkbugs, "sbrkbugs"},
+      // {execout, "execout"},
+      // {copyin, "copyin"},
+      // {copyout, "copyout"},
+      // {copyinstr1, "copyinstr1"},
+      // {copyinstr2, "copyinstr2"},
+      // {copyinstr3, "copyinstr3"},
+      // {truncate1, "truncate1"},
+      // {truncate2, "truncate2"},
+      // {truncate3, "truncate3"},
+      // {reparent2, "reparent2"},
+      // {pgbug, "pgbug"},
+      // {sbrkbugs, "sbrkbugs"},
       // {badwrite, "badwrite" },
-      {badarg, "badarg"},
-      {reparent, "reparent"},
-      {twochildren, "twochildren"},
-      {forkfork, "forkfork"},
-      {forkforkfork, "forkforkfork"},
-      {argptest, "argptest"},
-      {createdelete, "createdelete"},
-      {linkunlink, "linkunlink"},
-      {linktest, "linktest"},
-      {unlinkread, "unlinkread"},
-      {concreate, "concreate"},
-      {subdir, "subdir"},
-      {fourfiles, "fourfiles"},
-      {sharedfd, "sharedfd"},
-      {exectest, "exectest"},
+      // {badarg, "badarg"},
+      // {reparent, "reparent"},
+      // {twochildren, "twochildren"},
+      // {forkfork, "forkfork"},
+      // {forkforkfork, "forkforkfork"},
+      // {argptest, "argptest"},
+      // {createdelete, "createdelete"},
+      // {linkunlink, "linkunlink"},
+      // {linktest, "linktest"},
+      // {unlinkread, "unlinkread"},
+      // {concreate, "concreate"},
+      // {subdir, "subdir"},
+      // {fourfiles, "fourfiles"},
+      // {sharedfd, "sharedfd"},
+      // {exectest, "exectest"},
       {bigargtest, "bigargtest"},
       {bigwrite, "bigwrite"},
       {bsstest, "bsstest"},

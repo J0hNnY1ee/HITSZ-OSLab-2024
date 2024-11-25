@@ -256,7 +256,7 @@ int ddriver_ioctl(int fd, unsigned long cmd, void *arg){
         state.write_cnt = disk.write_cnt;
         state.seek_cnt = disk.seek_cnt;
         memcpy(arg, &state, sizeof(struct ddriver_state));
-        break;
+    break;
     case IOC_REQ_DEVICE_RESET:                        /* Reset Device */
         lseek(fd, 0, SEEK_SET);
         char buf[4096] = {'\0'};

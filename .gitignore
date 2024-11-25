@@ -1,0 +1,8 @@
+fs/demo/.cache/clangd/index/main.c.D80B6F07CE622F6A.idx
+fs/demo/.cache/clangd/index/ddriver_ctl_user.h.6A4EC12E8357967E.idx
+fs/demo/.cache/clangd/index/ddriver.h.0E6A437249FD3F83.idx
+.vscode/extensions.json
+*.make
+*.o
+*.o.d
+build

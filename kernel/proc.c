@@ -111,6 +111,12 @@ found:
     return 0;
   }
   p->k_pagetable = proc_kernel_pagetables_init();
+    if (p->k_pagetable == 0) {
+    proc_freepagetable(p->pagetable, p->sz);
+    freeproc(p);
+    release(&p->lock);
+    return 0;
+  }
   char *pa = kalloc();
   if (pa == 0) panic("kalloc");
   uint64 va = KSTACK((int)(p - proc));

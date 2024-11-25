@@ -126,6 +126,7 @@ void kerneltrap() {
   if ((which_dev = devintr()) == 0) {
     printf("scause %p\n", scause);
     printf("sepc=%p stval=%p\n", r_sepc(), r_stval());
+    // if(scause == 0xd) vmprint(myproc()->k_pagetable);
     panic("kerneltrap");
   }
 

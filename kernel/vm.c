@@ -564,6 +564,6 @@ void sync_pagetable(pagetable_t pagetable, pagetable_t k_pagetable, uint64 oldsz
     if ((pte_to = walk_modified(k_pagetable, i, 1)) == 0) {
       panic("u2k_vmcopy: pte walk fail");
     }
-    *pte_to = (*pte_from) & (~PTE_U);
+    *pte_to = *pte_from;
   }
 }

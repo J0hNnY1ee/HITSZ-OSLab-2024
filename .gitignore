@@ -6,3 +6,6 @@ fs/demo/.cache/clangd/index/ddriver.h.0E6A437249FD3F83.idx
 *.o
 *.o.d
 build
+fs/j1eefs/sfs/sfs_utils.c
+fs/j1eefs/sfs/sfs_debug.c
+fs/j1eefs/sfs/sfs.c

@@ -1,4 +1,3 @@
-xv6-oslab24-hitsz
+EXT2
 =====================
-
-It's a OSLab of HITSZ forked by MIT.
+这部分实现一个基于FUSE的青春版EXT2文件系统

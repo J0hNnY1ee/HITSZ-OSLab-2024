@@ -46,23 +46,23 @@ int jfs_calc_lvl(const char * path) {
  * @return int 
  */
 int jfs_driver_read(int offset, uint8_t *out_content, int size) {
-    int      offset_aligned = jFS_ROUND_DOWN(offset, jFS_IO_SZ());
+    int      offset_aligned = JFS_ROUND_DOWN(offset, JFS_IO_SZ());
     int      bias           = offset - offset_aligned;
-    int      size_aligned   = jFS_ROUND_UP((size + bias), jFS_IO_SZ());
+    int      size_aligned   = JFS_ROUND_UP((size + bias), JFS_IO_SZ());
     uint8_t* temp_content   = (uint8_t*)malloc(size_aligned);
     uint8_t* cur            = temp_content;
-    // lseek(jFS_DRIVER(), offset_aligned, SEEK_SET);
-    ddriver_seek(jFS_DRIVER(), offset_aligned, SEEK_SET);
+    // lseek(JFS_DRIVER(), offset_aligned, SEEK_SET);
+    ddriver_seek(JFS_DRIVER(), offset_aligned, SEEK_SET);
     while (size_aligned != 0)
     {
-        // read(jFS_DRIVER(), cur, jFS_IO_SZ());
-        ddriver_read(jFS_DRIVER(), cur, jFS_IO_SZ());
-        cur          += jFS_IO_SZ();
-        size_aligned -= jFS_IO_SZ();   
+        // read(JFS_DRIVER(), cur, JFS_IO_SZ());
+        ddriver_read(JFS_DRIVER(), cur, JFS_IO_SZ());
+        cur          += JFS_IO_SZ();
+        size_aligned -= JFS_IO_SZ();   
     }
     memcpy(out_content, temp_content + bias, size);
     free(temp_content);
-    return jFS_ERROR_NONE;
+    return JFS_ERROR_NONE;
 }
 /**
  * @brief 驱动写
@@ -73,26 +73,26 @@ int jfs_driver_read(int offset, uint8_t *out_content, int size) {
  * @return int 
  */
 int jfs_driver_write(int offset, uint8_t *in_content, int size) {
-    int      offset_aligned = jFS_ROUND_DOWN(offset, jFS_IO_SZ());
+    int      offset_aligned = JFS_ROUND_DOWN(offset, JFS_IO_SZ());
     int      bias           = offset - offset_aligned;
-    int      size_aligned   = jFS_ROUND_UP((size + bias), jFS_IO_SZ());
+    int      size_aligned   = JFS_ROUND_UP((size + bias), JFS_IO_SZ());
     uint8_t* temp_content   = (uint8_t*)malloc(size_aligned);
     uint8_t* cur            = temp_content;
     jfs_driver_read(offset_aligned, temp_content, size_aligned);
     memcpy(temp_content + bias, in_content, size);
     
-    // lseek(jFS_DRIVER(), offset_aligned, SEEK_SET);
-    ddriver_seek(jFS_DRIVER(), offset_aligned, SEEK_SET);
+    // lseek(JFS_DRIVER(), offset_aligned, SEEK_SET);
+    ddriver_seek(JFS_DRIVER(), offset_aligned, SEEK_SET);
     while (size_aligned != 0)
     {
-        // write(jFS_DRIVER(), cur, jFS_IO_SZ());
-        ddriver_write(jFS_DRIVER(), cur, jFS_IO_SZ());
-        cur          += jFS_IO_SZ();
-        size_aligned -= jFS_IO_SZ();   
+        // write(JFS_DRIVER(), cur, JFS_IO_SZ());
+        ddriver_write(JFS_DRIVER(), cur, JFS_IO_SZ());
+        cur          += JFS_IO_SZ();
+        size_aligned -= JFS_IO_SZ();   
     }
 
     free(temp_content);
-    return jFS_ERROR_NONE;
+    return JFS_ERROR_NONE;
 }
 /**
  * @brief 将denry插入到inode中，采用头插法
@@ -140,7 +140,7 @@ int jfs_drop_dentry(struct jfs_inode * inode, struct jfs_dentry * dentry) {
         }
     }
     if (!is_find) {
-        return -jFS_ERROR_NOTFOUND;
+        return -JFS_ERROR_NOTFOUND;
     }
     inode->dir_cnt--;
     return inode->dir_cnt;
@@ -158,7 +158,7 @@ struct jfs_inode* jfs_alloc_inode(struct jfs_dentry * dentry) {
     int ino_cursor  = 0;
     boolean is_find_free_entry = FALSE;
     /* 检查位图是否有空位 */
-    for (byte_cursor = 0; byte_cursor < jFS_BLKS_SZ(jfs_super.map_inode_blks); 
+    for (byte_cursor = 0; byte_cursor < JFS_BLKS_SZ(jfs_super.map_inode_blks); 
          byte_cursor++)
     {
         for (bit_cursor = 0; bit_cursor < UINT8_BITS; bit_cursor++) {
@@ -176,7 +176,7 @@ struct jfs_inode* jfs_alloc_inode(struct jfs_dentry * dentry) {
     }
 
     if (!is_find_free_entry || ino_cursor == jfs_super.max_ino)
-        return -jFS_ERROR_NOSPACE;
+        return -JFS_ERROR_NOSPACE;
 
     inode = (struct jfs_inode*)malloc(sizeof(struct jfs_inode));
     inode->ino  = ino_cursor; 
@@ -190,8 +190,8 @@ struct jfs_inode* jfs_alloc_inode(struct jfs_dentry * dentry) {
     inode->dir_cnt = 0;
     inode->dentrys = NULL;
     
-    if (jFS_IS_REG(inode)) {
-        inode->data = (uint8_t *)malloc(jFS_BLKS_SZ(jFS_DATA_PER_FILE));
+    if (JFS_IS_REG(inode)) {
+        inode->data = (uint8_t *)malloc(JFS_BLKS_SZ(JFS_DATA_PER_FILE));
     }
 
     return inode;
@@ -209,30 +209,30 @@ int jfs_sync_inode(struct jfs_inode * inode) {
     int ino             = inode->ino;
     inode_d.ino         = ino;
     inode_d.size        = inode->size;
-    memcpy(inode_d.target_path, inode->target_path, jFS_MAX_FILE_NAME);
+    memcpy(inode_d.target_path, inode->target_path, JFS_MAX_FILE_NAME);
     inode_d.ftype       = inode->dentry->ftype;
     inode_d.dir_cnt     = inode->dir_cnt;
     int offset;
     /* 先写inode本身 */
-    if (jfs_driver_write(jFS_INO_OFS(ino), (uint8_t *)&inode_d, 
-                     sizeof(struct jfs_inode_d)) != jFS_ERROR_NONE) {
-        jFS_DBG("[%s] io error\n", __func__);
-        return -jFS_ERROR_IO;
+    if (jfs_driver_write(JFS_INO_OFS(ino), (uint8_t *)&inode_d, 
+                     sizeof(struct jfs_inode_d)) != JFS_ERROR_NONE) {
+        JFS_DBG("[%s] io error\n", __func__);
+        return -JFS_ERROR_IO;
     }
 
     /* 再写inode下方的数据 */
-    if (jFS_IS_DIR(inode)) { /* 如果当前inode是目录，那么数据是目录项，且目录项的inode也要写回 */                          
+    if (JFS_IS_DIR(inode)) { /* 如果当前inode是目录，那么数据是目录项，且目录项的inode也要写回 */                          
         dentry_cursor = inode->dentrys;
-        offset        = jFS_DATA_OFS(ino);
+        offset        = JFS_DATA_OFS(ino);
         while (dentry_cursor != NULL)
         {
-            memcpy(dentry_d.fname, dentry_cursor->fname, jFS_MAX_FILE_NAME);
+            memcpy(dentry_d.fname, dentry_cursor->fname, JFS_MAX_FILE_NAME);
             dentry_d.ftype = dentry_cursor->ftype;
             dentry_d.ino = dentry_cursor->ino;
             if (jfs_driver_write(offset, (uint8_t *)&dentry_d, 
-                                 sizeof(struct jfs_dentry_d)) != jFS_ERROR_NONE) {
-                jFS_DBG("[%s] io error\n", __func__);
-                return -jFS_ERROR_IO;                     
+                                 sizeof(struct jfs_dentry_d)) != JFS_ERROR_NONE) {
+                JFS_DBG("[%s] io error\n", __func__);
+                return -JFS_ERROR_IO;                     
             }
             
             if (dentry_cursor->inode != NULL) {
@@ -243,14 +243,14 @@ int jfs_sync_inode(struct jfs_inode * inode) {
             offset += sizeof(struct jfs_dentry_d);
         }
     }
-    else if (jFS_IS_REG(inode)) { /* 如果当前inode是文件，那么数据是文件内容，直接写即可 */
-        if (jfs_driver_write(jFS_DATA_OFS(ino), inode->data, 
-                             jFS_BLKS_SZ(jFS_DATA_PER_FILE)) != jFS_ERROR_NONE) {
-            jFS_DBG("[%s] io error\n", __func__);
-            return -jFS_ERROR_IO;
+    else if (JFS_IS_REG(inode)) { /* 如果当前inode是文件，那么数据是文件内容，直接写即可 */
+        if (jfs_driver_write(JFS_DATA_OFS(ino), inode->data, 
+                             JFS_BLKS_SZ(JFS_DATA_PER_FILE)) != JFS_ERROR_NONE) {
+            JFS_DBG("[%s] io error\n", __func__);
+            return -JFS_ERROR_IO;
         }
     }
-    return jFS_ERROR_NONE;
+    return JFS_ERROR_NONE;
 }
 /**
  * @brief 删除内存中的一个inode
@@ -291,10 +291,10 @@ int jfs_drop_inode(struct jfs_inode * inode) {
     boolean is_find = FALSE;
 
     if (inode == jfs_super.root_dentry->inode) {
-        return jFS_ERROR_INVAL;
+        return JFS_ERROR_INVAL;
     }
 
-    if (jFS_IS_DIR(inode)) {
+    if (JFS_IS_DIR(inode)) {
         dentry_cursor = inode->dentrys;
                                                       /* 递归向下drop */
         while (dentry_cursor)
@@ -307,7 +307,7 @@ int jfs_drop_inode(struct jfs_inode * inode) {
             free(dentry_to_free);
         }
 
-        for (byte_cursor = 0; byte_cursor < jFS_BLKS_SZ(jfs_super.map_inode_blks); 
+        for (byte_cursor = 0; byte_cursor < JFS_BLKS_SZ(jfs_super.map_inode_blks); 
             byte_cursor++)                            /* 调整inodemap */
         {
             for (bit_cursor = 0; bit_cursor < UINT8_BITS; bit_cursor++) {
@@ -323,8 +323,8 @@ int jfs_drop_inode(struct jfs_inode * inode) {
             }
         }
     }
-    else if (jFS_IS_REG(inode) || jFS_IS_SYM_LINK(inode)) {
-        for (byte_cursor = 0; byte_cursor < jFS_BLKS_SZ(jfs_super.map_inode_blks); 
+    else if (JFS_IS_REG(inode) || JFS_IS_SYM_LINK(inode)) {
+        for (byte_cursor = 0; byte_cursor < JFS_BLKS_SZ(jfs_super.map_inode_blks); 
             byte_cursor++)                            /* 调整inodemap */
         {
             for (bit_cursor = 0; bit_cursor < UINT8_BITS; bit_cursor++) {
@@ -343,7 +343,7 @@ int jfs_drop_inode(struct jfs_inode * inode) {
             free(inode->data);
         free(inode);
     }
-    return jFS_ERROR_NONE;
+    return JFS_ERROR_NONE;
 }
 /**
  * @brief 
@@ -359,26 +359,26 @@ struct jfs_inode* jfs_read_inode(struct jfs_dentry * dentry, int ino) {
     struct jfs_dentry_d dentry_d;
     int    dir_cnt = 0, i;
     /* 从磁盘读索引结点 */
-    if (jfs_driver_read(jFS_INO_OFS(ino), (uint8_t *)&inode_d, 
-                        sizeof(struct jfs_inode_d)) != jFS_ERROR_NONE) {
-        jFS_DBG("[%s] io error\n", __func__);
+    if (jfs_driver_read(JFS_INO_OFS(ino), (uint8_t *)&inode_d, 
+                        sizeof(struct jfs_inode_d)) != JFS_ERROR_NONE) {
+        JFS_DBG("[%s] io error\n", __func__);
         return NULL;                    
     }
     inode->dir_cnt = 0;
     inode->ino = inode_d.ino;
     inode->size = inode_d.size;
-    memcpy(inode->target_path, inode_d.target_path, jFS_MAX_FILE_NAME);
+    memcpy(inode->target_path, inode_d.target_path, JFS_MAX_FILE_NAME);
     inode->dentry = dentry;
     inode->dentrys = NULL;
     /* 内存中的inode的数据或子目录项部分也需要读出 */
-    if (jFS_IS_DIR(inode)) {
+    if (JFS_IS_DIR(inode)) {
         dir_cnt = inode_d.dir_cnt;
         for (i = 0; i < dir_cnt; i++)
         {
-            if (jfs_driver_read(jFS_DATA_OFS(ino) + i * sizeof(struct jfs_dentry_d), 
+            if (jfs_driver_read(JFS_DATA_OFS(ino) + i * sizeof(struct jfs_dentry_d), 
                                 (uint8_t *)&dentry_d, 
-                                sizeof(struct jfs_dentry_d)) != jFS_ERROR_NONE) {
-                jFS_DBG("[%s] io error\n", __func__);
+                                sizeof(struct jfs_dentry_d)) != JFS_ERROR_NONE) {
+                JFS_DBG("[%s] io error\n", __func__);
                 return NULL;
             }
             sub_dentry = new_dentry(dentry_d.fname, dentry_d.ftype);
@@ -387,11 +387,11 @@ struct jfs_inode* jfs_read_inode(struct jfs_dentry * dentry, int ino) {
             jfs_alloc_dentry(inode, sub_dentry);
         }
     }
-    else if (jFS_IS_REG(inode)) {
-        inode->data = (uint8_t *)malloc(jFS_BLKS_SZ(jFS_DATA_PER_FILE));
-        if (jfs_driver_read(jFS_DATA_OFS(ino), (uint8_t *)inode->data, 
-                            jFS_BLKS_SZ(jFS_DATA_PER_FILE)) != jFS_ERROR_NONE) {
-            jFS_DBG("[%s] io error\n", __func__);
+    else if (JFS_IS_REG(inode)) {
+        inode->data = (uint8_t *)malloc(JFS_BLKS_SZ(JFS_DATA_PER_FILE));
+        if (jfs_driver_read(JFS_DATA_OFS(ino), (uint8_t *)inode->data, 
+                            JFS_BLKS_SZ(JFS_DATA_PER_FILE)) != JFS_ERROR_NONE) {
+            JFS_DBG("[%s] io error\n", __func__);
             return NULL;                    
         }
     }
@@ -469,12 +469,12 @@ struct jfs_dentry* jfs_lookup(const char * path, boolean* is_find, boolean* is_r
 
         inode = dentry_cursor->inode;
 
-        if (jFS_IS_REG(inode) && lvl < total_lvl) {
-            jFS_DBG("[%s] not a dir\n", __func__);
+        if (JFS_IS_REG(inode) && lvl < total_lvl) {
+            JFS_DBG("[%s] not a dir\n", __func__);
             dentry_ret = inode->dentry;
             break;
         }
-        if (jFS_IS_DIR(inode)) {
+        if (JFS_IS_DIR(inode)) {
             dentry_cursor = inode->dentrys;
             is_hit        = FALSE;
 
@@ -489,7 +489,7 @@ struct jfs_dentry* jfs_lookup(const char * path, boolean* is_find, boolean* is_r
             
             if (!is_hit) {
                 *is_find = FALSE;
-                jFS_DBG("[%s] not found %s\n", __func__, fname);
+                JFS_DBG("[%s] not found %s\n", __func__, fname);
                 dentry_ret = inode->dentry;
                 break;
             }
@@ -522,7 +522,7 @@ struct jfs_dentry* jfs_lookup(const char * path, boolean* is_find, boolean* is_r
  * @return int 
  */
 int jfs_mount(struct custom_options options){
-    int                 ret = jFS_ERROR_NONE;
+    int                 ret = JFS_ERROR_NONE;
     int                 driver_fd;
     struct jfs_super_d  jfs_super_d; 
     struct jfs_dentry*  root_dentry;
@@ -544,36 +544,36 @@ int jfs_mount(struct custom_options options){
     }
 
     jfs_super.driver_fd = driver_fd;
-    ddriver_ioctl(jFS_DRIVER(), IOC_REQ_DEVICE_SIZE,  &jfs_super.sz_disk);
-    ddriver_ioctl(jFS_DRIVER(), IOC_REQ_DEVICE_IO_SZ, &jfs_super.sz_io);
+    ddriver_ioctl(JFS_DRIVER(), IOC_REQ_DEVICE_SIZE,  &jfs_super.sz_disk);
+    ddriver_ioctl(JFS_DRIVER(), IOC_REQ_DEVICE_IO_SZ, &jfs_super.sz_io);
     
-    root_dentry = new_dentry("/", jFS_DIR);     /* 根目录项每次挂载时新建 */
+    root_dentry = new_dentry("/", JFS_DIR);     /* 根目录项每次挂载时新建 */
 
-    if (jfs_driver_read(jFS_SUPER_OFS, (uint8_t *)(&jfs_super_d), 
-                        sizeof(struct jfs_super_d)) != jFS_ERROR_NONE) {
-        return -jFS_ERROR_IO;
+    if (jfs_driver_read(JFS_SUPER_OFS, (uint8_t *)(&jfs_super_d), 
+                        sizeof(struct jfs_super_d)) != JFS_ERROR_NONE) {
+        return -JFS_ERROR_IO;
     }   
                                                       /* 读取super */
-    if (jfs_super_d.magic_num != jFS_MAGIC_NUM) {     /* 幻数不正确，初始化 */
+    if (jfs_super_d.magic_num != JFS_MAGIC_NUM) {     /* 幻数不正确，初始化 */
                                                       /* 估算各部分大小 */
-        super_blks = jFS_ROUND_UP(sizeof(struct jfs_super_d), jFS_IO_SZ()) / jFS_IO_SZ();
+        super_blks = JFS_ROUND_UP(sizeof(struct jfs_super_d), JFS_IO_SZ()) / JFS_IO_SZ();
 
-        inode_num  =  jFS_DISK_SZ() / ((jFS_DATA_PER_FILE + jFS_INODE_PER_FILE) * jFS_IO_SZ());
+        inode_num  =  JFS_DISK_SZ() / ((JFS_DATA_PER_FILE + JFS_INODE_PER_FILE) * JFS_IO_SZ());
 
-        map_inode_blks = jFS_ROUND_UP(jFS_ROUND_UP(inode_num, UINT32_BITS), jFS_IO_SZ()) 
-                         / jFS_IO_SZ();
+        map_inode_blks = JFS_ROUND_UP(JFS_ROUND_UP(inode_num, UINT32_BITS), JFS_IO_SZ()) 
+                         / JFS_IO_SZ();
                                                       /* 布局layout */
         jfs_super.max_ino = (inode_num - super_blks - map_inode_blks); 
-        jfs_super_d.map_inode_offset = jFS_SUPER_OFS + jFS_BLKS_SZ(super_blks);
-        jfs_super_d.data_offset = jfs_super_d.map_inode_offset + jFS_BLKS_SZ(map_inode_blks);
+        jfs_super_d.map_inode_offset = JFS_SUPER_OFS + JFS_BLKS_SZ(super_blks);
+        jfs_super_d.data_offset = jfs_super_d.map_inode_offset + JFS_BLKS_SZ(map_inode_blks);
         jfs_super_d.map_inode_blks  = map_inode_blks;
         jfs_super_d.sz_usage    = 0;
-        jFS_DBG("inode map blocks: %d\n", map_inode_blks);
+        JFS_DBG("inode map blocks: %d\n", map_inode_blks);
         is_init = TRUE;
     }
     jfs_super.sz_usage   = jfs_super_d.sz_usage;      /* 建立 in-memory 结构 */
     
-    jfs_super.map_inode = (uint8_t *)malloc(jFS_BLKS_SZ(jfs_super_d.map_inode_blks));
+    jfs_super.map_inode = (uint8_t *)malloc(JFS_BLKS_SZ(jfs_super_d.map_inode_blks));
     jfs_super.map_inode_blks = jfs_super_d.map_inode_blks;
     jfs_super.map_inode_offset = jfs_super_d.map_inode_offset;
     jfs_super.data_offset = jfs_super_d.data_offset;
@@ -583,8 +583,8 @@ int jfs_mount(struct custom_options options){
 	printf("\n--------------------------------------------------------------------------------\n\n");
 
     if (jfs_driver_read(jfs_super_d.map_inode_offset, (uint8_t *)(jfs_super.map_inode), 
-                        jFS_BLKS_SZ(jfs_super_d.map_inode_blks)) != jFS_ERROR_NONE) {
-        return -jFS_ERROR_IO;
+                        JFS_BLKS_SZ(jfs_super_d.map_inode_blks)) != JFS_ERROR_NONE) {
+        return -JFS_ERROR_IO;
     }
 
     if (is_init) {                                    /* 分配根节点 */
@@ -592,7 +592,7 @@ int jfs_mount(struct custom_options options){
         jfs_sync_inode(root_inode);
     }
     
-    root_inode            = jfs_read_inode(root_dentry, jFS_ROOT_INO);  /* 读取根目录 */
+    root_inode            = jfs_read_inode(root_dentry, JFS_ROOT_INO);  /* 读取根目录 */
     root_dentry->inode    = root_inode;
     jfs_super.root_dentry = root_dentry;
     jfs_super.is_mounted  = TRUE;
@@ -609,29 +609,29 @@ int jfs_umount() {
     struct jfs_super_d  jfs_super_d; 
 
     if (!jfs_super.is_mounted) {
-        return jFS_ERROR_NONE;
+        return JFS_ERROR_NONE;
     }
 
     jfs_sync_inode(jfs_super.root_dentry->inode);     /* 从根节点向下刷写节点 */
                                                     
-    jfs_super_d.magic_num           = jFS_MAGIC_NUM;
+    jfs_super_d.magic_num           = JFS_MAGIC_NUM;
     jfs_super_d.map_inode_blks      = jfs_super.map_inode_blks;
     jfs_super_d.map_inode_offset    = jfs_super.map_inode_offset;
     jfs_super_d.data_offset         = jfs_super.data_offset;
     jfs_super_d.sz_usage            = jfs_super.sz_usage;
 
-    if (jfs_driver_write(jFS_SUPER_OFS, (uint8_t *)&jfs_super_d, 
-                     sizeof(struct jfs_super_d)) != jFS_ERROR_NONE) {
-        return -jFS_ERROR_IO;
+    if (jfs_driver_write(JFS_SUPER_OFS, (uint8_t *)&jfs_super_d, 
+                     sizeof(struct jfs_super_d)) != JFS_ERROR_NONE) {
+        return -JFS_ERROR_IO;
     }
 
     if (jfs_driver_write(jfs_super_d.map_inode_offset, (uint8_t *)(jfs_super.map_inode), 
-                         jFS_BLKS_SZ(jfs_super_d.map_inode_blks)) != jFS_ERROR_NONE) {
-        return -jFS_ERROR_IO;
+                         JFS_BLKS_SZ(jfs_super_d.map_inode_blks)) != JFS_ERROR_NONE) {
+        return -JFS_ERROR_IO;
     }
 
     free(jfs_super.map_inode);
-    ddriver_close(jFS_DRIVER());
+    ddriver_close(JFS_DRIVER());
 
-    return jFS_ERROR_NONE;
+    return JFS_ERROR_NONE;
 }

@@ -595,108 +595,107 @@ struct jfs_dentry *jfs_lookup(const char *path, boolean *is_find,
  * @param options
  * @return int
  */
-int jfs_mount(struct custom_options options) {
-  int ret = JFS_ERROR_NONE;
-  int driver_fd;
-  struct jfs_super_d jfs_super_d;
-  struct jfs_dentry *root_dentry;
-  struct jfs_inode *root_inode;
+int jfs_mount(struct custom_options options){
+    int                 ret = JFS_ERROR_NONE;
+    int                 driver_fd;
+    struct jfs_super_d  jfs_super_d; 
+    struct jfs_dentry*  root_dentry;
+    struct jfs_inode*   root_inode;
 
-  int inode_num;
-  int map_inode_blks;
-  int data_num;
-  int map_data_blks;
+    int                 inode_num;
+    int                 map_inode_blks;
+    int                 data_num;
+    int                 map_data_blks;
+    
+    int                 super_blks;
+    boolean             is_init = FALSE;
 
-  int super_blks;
-  boolean is_init = FALSE;
+    jfs_super.is_mounted = FALSE;
+    driver_fd = ddriver_open(options.device);
 
-  jfs_super.is_mounted = FALSE;
+    if (driver_fd < 0) {
+        return driver_fd;
+    }
 
-  // driver_fd = open(options.device, O_RDWR);
-  driver_fd = ddriver_open(options.device);
+    // 向超级块中写入相关信息
+    jfs_super.driver_fd = driver_fd;
+    ddriver_ioctl(JFS_DRIVER(), IOC_REQ_DEVICE_SIZE,  &jfs_super.sz_disk);
+    ddriver_ioctl(JFS_DRIVER(), IOC_REQ_DEVICE_IO_SZ, &jfs_super.sz_io);
+    jfs_super.sz_blks = 2 * jfs_super.sz_io;  // 两个IO大小
+    // 新建根目录
+    root_dentry = new_dentry("/", JFS_DIR);
 
-  if (driver_fd < 0) {
-    return driver_fd;
-  }
+    // 读取磁盘超级块内容
+    if (jfs_driver_read(JFS_SUPER_OFS, (uint8_t *)(&jfs_super_d), sizeof(struct jfs_super_d)) != JFS_ERROR_NONE) {
+        return -JFS_ERROR_IO;
+    }   
+    
+    // 根据磁盘超级块的幻数判断是否是第一次挂载
+    if (jfs_super_d.magic != JFS_MAGIC_NUM) {    
+        // 计算各部分的大小
+        // 宏定义在type.h中
+        super_blks      = JFS_SUPER_BLKS;
+        map_inode_blks  = JFS_INODE_MAP_BLKS;
+        map_data_blks   = JFS_DATA_MAP_BLKS;
+        inode_num       = JFS_INODE_BLKS;
+        data_num        = JFS_DATA_BLKS;
 
-  jfs_super.driver_fd = driver_fd;
-  ddriver_ioctl(JFS_DRIVER(), IOC_REQ_DEVICE_SIZE, &jfs_super.sz_disk);
-  ddriver_ioctl(JFS_DRIVER(), IOC_REQ_DEVICE_IO_SZ, &jfs_super.sz_io);
-  jfs_super.sz_blks = 2 * jfs_super.sz_io;
-  root_dentry = new_dentry("/", JFS_DIR); /* 根目录项每次挂载时新建 */
+        // 布局layout 
+        jfs_super.max_ino               = inode_num;
+        jfs_super.max_dno               = data_num;
+        jfs_super_d.map_inode_blks      = map_inode_blks; 
+        jfs_super_d.map_data_blks       = map_data_blks; 
+        jfs_super_d.map_inode_offset    = JFS_SUPER_OFS + JFS_BLKS_SZ(super_blks);
+        jfs_super_d.map_data_offset     = jfs_super_d.map_inode_offset + JFS_BLKS_SZ(map_inode_blks);
+        jfs_super_d.inode_offset        = jfs_super_d.map_data_offset + JFS_BLKS_SZ(map_data_blks);
+        jfs_super_d.data_offset         = jfs_super_d.inode_offset + JFS_BLKS_SZ(inode_num);
 
-  if (jfs_driver_read(JFS_SUPER_OFS, (uint8_t *)(&jfs_super_d),
-                      sizeof(struct jfs_super_d)) != JFS_ERROR_NONE) {
-    return -JFS_ERROR_IO;
-  }
-  /* 读取super */
-  if (jfs_super_d.magic != JFS_MAGIC_NUM) { /* 幻数不正确，初始化 */
-                                            /* 估算各部分大小 */
-    // defined in type.h
-    super_blks = JFS_SUPER_BLKS;
-    map_inode_blks = JFS_INODE_MAP_BLKS;
-    inode_num = JFS_INODE_BLKS;
-    map_data_blks = JFS_DATA_MAP_BLKS;
-    data_num = JFS_DATA_BLKS;
+        jfs_super_d.sz_usage            = 0;
+        jfs_super_d.magic               = JFS_MAGIC_NUM;
 
-    /* 布局layout */
-    jfs_super.max_ino = inode_num;
-    jfs_super.max_dno = data_num;
+        is_init = TRUE;
+    }
 
-    jfs_super_d.map_inode_offset = JFS_SUPER_OFS + JFS_BLKS_SZ(super_blks);
-    jfs_super_d.data_offset =
-        jfs_super_d.map_inode_offset + JFS_BLKS_SZ(map_inode_blks);
+    // 建立 in-memory 结构 
+    // 初始化超级块
+    jfs_super.sz_usage   = jfs_super_d.sz_usage; 
 
-    jfs_super_d.map_inode_blks = map_inode_blks;
-    jfs_super_d.map_data_blks = map_data_blks;
+    // 建立索引位图    
+    jfs_super.map_inode         = (uint8_t *)malloc(JFS_BLKS_SZ(jfs_super_d.map_inode_blks));
+    jfs_super.map_inode_blks    = jfs_super_d.map_inode_blks;
+    jfs_super.map_inode_offset  = jfs_super_d.map_inode_offset;
+    jfs_super.inode_offset      = jfs_super_d.inode_offset;
 
-    jfs_super_d.sz_usage = 0;
+    // 建立数据位图
+    jfs_super.map_data          = (uint8_t *)malloc(JFS_BLKS_SZ(jfs_super_d.map_data_blks));
+    jfs_super.map_data_blks     = jfs_super_d.map_data_blks;
+    jfs_super.map_data_offset   = jfs_super_d.map_data_offset;
+    jfs_super.data_offset       = jfs_super_d.data_offset;
 
-    JFS_DBG("inode map blocks: %d\n", map_inode_blks);
-    is_init = TRUE;
-  }
+    // 从磁盘中读取索引位图
+    if (jfs_driver_read(jfs_super_d.map_inode_offset, (uint8_t *)(jfs_super.map_inode), 
+                        JFS_BLKS_SZ(jfs_super_d.map_inode_blks)) != JFS_ERROR_NONE) {
+        return -JFS_ERROR_IO;
+    }
 
-  jfs_super.sz_usage = jfs_super_d.sz_usage; /* 建立 in-memory 结构 */
+    // 从磁盘中读取数据位图
+    if (jfs_driver_read(jfs_super_d.map_data_offset, (uint8_t *)(jfs_super.map_data), 
+                        JFS_BLKS_SZ(jfs_super_d.map_data_blks)) != JFS_ERROR_NONE) {
+        return -JFS_ERROR_IO;
+    }
 
-  jfs_super.map_inode =
-      (uint8_t *)malloc(JFS_BLKS_SZ(jfs_super_d.map_inode_blks));
-  jfs_super.map_inode_blks = jfs_super_d.map_inode_blks;
-  jfs_super.map_inode_offset = jfs_super_d.map_inode_offset;
-  jfs_super.inode_offset = jfs_super_d.inode_offset;
+    // 分配根节点 
+    if (is_init) {                                    
+        root_inode = jfs_alloc_inode(root_dentry);
+        jfs_sync_inode(root_inode);
+    }
+    
+    root_inode            = jfs_read_inode(root_dentry, JFS_ROOT_INO);
+    root_dentry->inode    = root_inode;
+    jfs_super.root_dentry = root_dentry;
+    jfs_super.is_mounted  = TRUE;
 
-  jfs_super.map_data =
-      (uint8_t *)malloc(JFS_BLKS_SZ(jfs_super_d.map_data_blks));
-  jfs_super.map_data_blks = jfs_super_d.map_data_blks;
-  jfs_super.map_data_offset = jfs_super_d.map_data_offset;
-  jfs_super.data_offset = jfs_super_d.data_offset;
-  jfs_dump_map();
-
-  printf("\n-------------------------------------------------------------------"
-         "-------------\n\n");
-
-  if (jfs_driver_read(
-          jfs_super_d.map_inode_offset, (uint8_t *)(jfs_super.map_inode),
-          JFS_BLKS_SZ(jfs_super_d.map_inode_blks)) != JFS_ERROR_NONE) {
-    return -JFS_ERROR_IO;
-  }
-  if (jfs_driver_read(
-          jfs_super_d.map_data_offset, (uint8_t *)(jfs_super.map_data),
-          JFS_BLKS_SZ(jfs_super_d.map_data_blks)) != JFS_ERROR_NONE) {
-    return -JFS_ERROR_IO;
-  }
-
-  if (is_init) { /* 分配根节点 */
-    root_inode = jfs_alloc_inode(root_dentry);
-    jfs_sync_inode(root_inode);
-  }
-
-  root_inode = jfs_read_inode(root_dentry, JFS_ROOT_INO); /* 读取根目录 */
-  root_dentry->inode = root_inode;
-  jfs_super.root_dentry = root_dentry;
-  jfs_super.is_mounted = TRUE;
-
-  jfs_dump_map();
-  return ret;
+    return ret;
 }
 /**
  * @brief
@@ -704,46 +703,51 @@ int jfs_mount(struct custom_options options) {
  * @return int
  */
 int jfs_umount() {
-  struct jfs_super_d jfs_super_d;
+    struct jfs_super_d  jfs_super_d; 
 
-  if (!jfs_super.is_mounted) {
+    // 没有挂载直接报错
+    if (!jfs_super.is_mounted) {
+        return JFS_ERROR_NONE;
+    }
+
+    // 从根节点向下刷写节点 
+    jfs_sync_inode(jfs_super.root_dentry->inode);     
+
+    // 将内存中的超级块刷回磁盘                              
+    jfs_super_d.magic               = JFS_MAGIC_NUM;
+    jfs_super_d.sz_usage            = jfs_super.sz_usage;
+
+    jfs_super_d.map_inode_blks      = jfs_super.map_inode_blks;
+    jfs_super_d.map_inode_offset    = jfs_super.map_inode_offset;
+    jfs_super_d.inode_offset        = jfs_super.inode_offset;
+
+    jfs_super_d.map_data_blks       = jfs_super.map_data_blks;
+    jfs_super_d.map_data_offset     = jfs_super.map_data_offset;
+    jfs_super_d.data_offset         = jfs_super.data_offset;
+    
+    if (jfs_driver_write(JFS_SUPER_OFS, (uint8_t *)&jfs_super_d, 
+                     sizeof(struct jfs_super_d)) != JFS_ERROR_NONE) {
+        return -JFS_ERROR_IO;
+    }
+
+    // 将索引位图刷回磁盘 
+    if (jfs_driver_write(jfs_super_d.map_inode_offset, (uint8_t *)(jfs_super.map_inode), 
+                         JFS_BLKS_SZ(jfs_super_d.map_inode_blks)) != JFS_ERROR_NONE) {
+        return -JFS_ERROR_IO;
+    }
+
+    // 将数据位图刷回磁盘
+    if (jfs_driver_write(jfs_super_d.map_data_offset, (uint8_t *)(jfs_super.map_data), 
+                         JFS_BLKS_SZ(jfs_super_d.map_data_blks)) != JFS_ERROR_NONE) {
+        return -JFS_ERROR_IO;
+    }
+
+    // 释放内存中的位图
+    free(jfs_super.map_inode);
+    free(jfs_super.map_data);
+
+    // 关闭驱动 
+    ddriver_close(JFS_DRIVER());
+
     return JFS_ERROR_NONE;
-  }
-
-  jfs_sync_inode(jfs_super.root_dentry->inode); /* 从根节点向下刷写节点 */
-
-  jfs_super_d.magic = JFS_MAGIC_NUM;
-  jfs_super_d.sz_usage = jfs_super.sz_usage;
-
-  jfs_super_d.map_inode_blks = jfs_super.map_inode_blks;
-  jfs_super_d.map_inode_offset = jfs_super.map_inode_offset;
-  jfs_super_d.inode_offset = jfs_super.inode_offset;
-
-  jfs_super_d.map_data_blks = jfs_super.map_data_blks;
-  jfs_super_d.map_data_offset = jfs_super.map_data_offset;
-  jfs_super_d.data_offset = jfs_super.data_offset;
-
-  // write super
-  if (jfs_driver_write(JFS_SUPER_OFS, (uint8_t *)&jfs_super_d,
-                       sizeof(struct jfs_super_d)) != JFS_ERROR_NONE) {
-    return -JFS_ERROR_IO;
-  }
-
-  if (jfs_driver_write(
-          jfs_super_d.map_inode_offset, (uint8_t *)(jfs_super.map_inode),
-          JFS_BLKS_SZ(jfs_super_d.map_inode_blks)) != JFS_ERROR_NONE) {
-    return -JFS_ERROR_IO;
-  }
-  if (jfs_driver_write(
-          jfs_super_d.map_data_offset, (uint8_t *)(jfs_super.map_data),
-          JFS_BLKS_SZ(jfs_super_d.map_data_blks)) != JFS_ERROR_NONE) {
-    return -JFS_ERROR_IO;
-  }
-
-  free(jfs_super.map_inode);
-  free(jfs_super.map_data);
-
-  ddriver_close(JFS_DRIVER());
-
-  return JFS_ERROR_NONE;
 }

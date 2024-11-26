@@ -52,9 +52,9 @@ int jfs_calc_lvl(const char *path) {
  */
 int jfs_driver_read(int offset, uint8_t *out_content, int size) {
   // begin down , end up.
-  int offset_aligned = JFS_ROUND_DOWN(offset, JFS_IO_SZ());
+  int offset_aligned = JFS_ROUND_DOWN(offset, JFS_BLK_SZ());
   int bias = offset - offset_aligned;
-  int size_aligned = JFS_ROUND_UP((size + bias), JFS_IO_SZ());
+  int size_aligned = JFS_ROUND_UP((size + bias), JFS_BLK_SZ());
   uint8_t *temp_content = (uint8_t *)malloc(size_aligned);
   uint8_t *cur = temp_content;
   // lseek(JFS_DRIVER(), offset_aligned, SEEK_SET);
@@ -80,9 +80,9 @@ int jfs_driver_read(int offset, uint8_t *out_content, int size) {
 
 // driver_write is the reverse of driver_read
 int jfs_driver_write(int offset, uint8_t *in_content, int size) {
-  int offset_aligned = JFS_ROUND_DOWN(offset, JFS_IO_SZ());
+  int offset_aligned = JFS_ROUND_DOWN(offset, JFS_BLK_SZ());
   int bias = offset - offset_aligned;
-  int size_aligned = JFS_ROUND_UP((size + bias), JFS_IO_SZ());
+  int size_aligned = JFS_ROUND_UP((size + bias), JFS_BLK_SZ());
   uint8_t *temp_content = (uint8_t *)malloc(size_aligned);
   uint8_t *cur = temp_content;
   jfs_driver_read(offset_aligned, temp_content, size_aligned);

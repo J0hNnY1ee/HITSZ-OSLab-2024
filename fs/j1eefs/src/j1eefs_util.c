@@ -338,69 +338,69 @@ int jfs_sync_inode(struct jfs_inode *inode) {
  * @param inode
  * @return int
  */
-int jfs_drop_inode(struct jfs_inode *inode) {
-  struct jfs_dentry *dentry_cursor;
-  struct jfs_dentry *dentry_to_free;
-  struct jfs_inode *inode_cursor;
+// int jfs_drop_inode(struct jfs_inode *inode) {
+//   struct jfs_dentry *dentry_cursor;
+//   struct jfs_dentry *dentry_to_free;
+//   struct jfs_inode *inode_cursor;
 
-  int byte_cursor = 0;
-  int bit_cursor = 0;
-  int ino_cursor = 0;
-  boolean is_find = FALSE;
+//   int byte_cursor = 0;
+//   int bit_cursor = 0;
+//   int ino_cursor = 0;
+//   boolean is_find = FALSE;
 
-  if (inode == jfs_super.root_dentry->inode) {
-    return JFS_ERROR_INVAL;
-  }
+//   if (inode == jfs_super.root_dentry->inode) {
+//     return JFS_ERROR_INVAL;
+//   }
 
-  if (JFS_IS_DIR(inode)) {
-    dentry_cursor = inode->dentrys_child;
-    /* 递归向下drop */
-    while (dentry_cursor) {
-      inode_cursor = dentry_cursor->inode;
-      jfs_drop_inode(inode_cursor);
-      jfs_drop_dentry(inode, dentry_cursor);
-      dentry_to_free = dentry_cursor;
-      dentry_cursor = dentry_cursor->brother;
-      free(dentry_to_free);
-    }
+//   if (JFS_IS_DIR(inode)) {
+//     dentry_cursor = inode->dentrys_child;
+//     /* 递归向下drop */
+//     while (dentry_cursor) {
+//       inode_cursor = dentry_cursor->inode;
+//       jfs_drop_inode(inode_cursor);
+//       jfs_drop_dentry(inode, dentry_cursor);
+//       dentry_to_free = dentry_cursor;
+//       dentry_cursor = dentry_cursor->brother;
+//       free(dentry_to_free);
+//     }
 
-    for (byte_cursor = 0; byte_cursor < JFS_BLKS_SZ(jfs_super.map_inode_blks);
-         byte_cursor++) /* 调整inodemap */
-    {
-      for (bit_cursor = 0; bit_cursor < UINT8_BITS; bit_cursor++) {
-        if (ino_cursor == inode->ino) {
-          jfs_super.map_inode[byte_cursor] &= (uint8_t)(~(0x1 << bit_cursor));
-          is_find = TRUE;
-          break;
-        }
-        ino_cursor++;
-      }
-      if (is_find == TRUE) {
-        break;
-      }
-    }
-  } else if (JFS_IS_REG(inode) || JFS_IS_SYM_LINK(inode)) {
-    for (byte_cursor = 0; byte_cursor < JFS_BLKS_SZ(jfs_super.map_inode_blks);
-         byte_cursor++) /* 调整inodemap */
-    {
-      for (bit_cursor = 0; bit_cursor < UINT8_BITS; bit_cursor++) {
-        if (ino_cursor == inode->ino) {
-          jfs_super.map_inode[byte_cursor] &= (uint8_t)(~(0x1 << bit_cursor));
-          is_find = TRUE;
-          break;
-        }
-        ino_cursor++;
-      }
-      if (is_find == TRUE) {
-        break;
-      }
-    }
-    if (inode->data)
-      free(inode->data);
-    free(inode);
-  }
-  return JFS_ERROR_NONE;
-}
+//     for (byte_cursor = 0; byte_cursor < JFS_BLKS_SZ(jfs_super.map_inode_blks);
+//          byte_cursor++) /* 调整inodemap */
+//     {
+//       for (bit_cursor = 0; bit_cursor < UINT8_BITS; bit_cursor++) {
+//         if (ino_cursor == inode->ino) {
+//           jfs_super.map_inode[byte_cursor] &= (uint8_t)(~(0x1 << bit_cursor));
+//           is_find = TRUE;
+//           break;
+//         }
+//         ino_cursor++;
+//       }
+//       if (is_find == TRUE) {
+//         break;
+//       }
+//     }
+//   } else if (JFS_IS_REG(inode) || JFS_IS_SYM_LINK(inode)) {
+//     for (byte_cursor = 0; byte_cursor < JFS_BLKS_SZ(jfs_super.map_inode_blks);
+//          byte_cursor++) /* 调整inodemap */
+//     {
+//       for (bit_cursor = 0; bit_cursor < UINT8_BITS; bit_cursor++) {
+//         if (ino_cursor == inode->ino) {
+//           jfs_super.map_inode[byte_cursor] &= (uint8_t)(~(0x1 << bit_cursor));
+//           is_find = TRUE;
+//           break;
+//         }
+//         ino_cursor++;
+//       }
+//       if (is_find == TRUE) {
+//         break;
+//       }
+//     }
+//     if (inode->data)
+//       free(inode->data);
+//     free(inode);
+//   }
+//   return JFS_ERROR_NONE;
+// }
 /**
  * @brief
  *

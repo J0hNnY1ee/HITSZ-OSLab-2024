@@ -32,8 +32,8 @@ static struct fuse_operations operations = {
     .unlink = jfs_unlink,     /* 删除文件 */
     .rmdir = jfs_rmdir,       /* 删除目录， rm -r */
     .rename = jfs_rename,     /* 重命名，mv */
-    .readlink = jfs_readlink, /* 读链接 */
-    .symlink = jfs_symlink,   /* 软链接 */
+    .readlink = NULL, /* 读链接 */
+    .symlink = NULL,   /* 软链接 */
 
     .open = jfs_open,
     .opendir = jfs_opendir,

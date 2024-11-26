@@ -60,10 +60,11 @@ typedef enum jfs_file_type { // 定义文件类型
  * SECTION: Macro Function
  *******************************************************************************/
 #define JFS_IO_SZ() (jfs_super.sz_io)    // 512B
-#define JFS_BLK_SZ() (nfs_super.sz_blks) // 1024B = 2 * 512B
+#define JFS_BLK_SZ() (jfs_super.sz_blks) // 1024B = 2 * 512B
 #define JFS_BLKS_SZ(blks) ((blks)*JFS_IO_SZ())
 #define JFS_DISK_SZ() (jfs_super.sz_disk) // 4MB
 #define JFS_DRIVER() (jfs_super.driver_fd)
+#define JFS_DENTRY_PER_BLK()            (JFS_BLK_SZ() / sizeof(struct jfs_dentry))
 
 #define JFS_ROUND_DOWN(value, round)                                           \
   ((value) % (round) == 0 ? (value) : ((value) / (round)) * (round))
@@ -74,8 +75,8 @@ typedef enum jfs_file_type { // 定义文件类型
 #define JFS_ASSIGN_FNAME(pjfs_dentry, _fname)                                  \
   memcpy(pjfs_dentry->fname, _fname, strlen(_fname))
 // offset
-#define JFS_INO_OFS(ino) (nfs_super.inode_offset + JFS_BLKS_SZ(ino))
-#define JFS_DATA_OFS(dno) (nfs_super.data_offset + JFS_BLKS_SZ(dno))
+#define JFS_INO_OFS(ino) (jfs_super.inode_offset + JFS_BLKS_SZ(ino))
+#define JFS_DATA_OFS(dno) (jfs_super.data_offset + JFS_BLKS_SZ(dno))
 
 #define JFS_IS_DIR(pinode) (pinode->dentry_pa->ftype == JFS_DIR)
 #define JFS_IS_REG(pinode) (pinode->dentry_pa->ftype == JFS_REG_FILE)
@@ -129,7 +130,7 @@ struct jfs_inode {
   struct jfs_dentry *dentry_pa;
   struct jfs_dentry *dentrys_child;
   JFS_FILE_TYPE ftype;
-  uint8_t data[JFS_DATA_PER_FILE]; // 3
+  uint8_t *data[JFS_DATA_PER_FILE]; // 3
   int blocks_used_cnt;
 };
 
@@ -185,7 +186,7 @@ struct jfs_inode_d {
   int block_pointer[JFS_DATA_PER_FILE];
   int dir_cnt;
   JFS_FILE_TYPE ftype;
-  int block_allocted;
+  int blocks_used_cnt;
 };
 
 struct jfs_dentry_d {

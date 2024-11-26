@@ -25,19 +25,19 @@ static struct fuse_operations operations = {
     .getattr = jfs_getattr, /* 获取文件属性，类似stat，必须完成 */
     .readdir = jfs_readdir, /* 填充dentrys */
     .mknod = jfs_mknod,     /* 创建文件，touch相关 */
-    .write = jfs_write,     /* 写入文件 */
-    .read = jfs_read,       /* 读文件 */
+    .write = NULL,     /* 写入文件 */
+    .read = NULL,       /* 读文件 */
     .utimens = jfs_utimens, /* 修改时间，忽略，避免touch报错 */
-    .truncate = jfs_truncate, /* 改变文件大小 */
-    .unlink = jfs_unlink,     /* 删除文件 */
-    .rmdir = jfs_rmdir,       /* 删除目录， rm -r */
-    .rename = jfs_rename,     /* 重命名，mv */
+    .truncate = NULL, /* 改变文件大小 */
+    .unlink = NULL,     /* 删除文件 */
+    .rmdir = NULL,       /* 删除目录， rm -r */
+    .rename = NULL,     /* 重命名，mv */
     .readlink = NULL, /* 读链接 */
     .symlink = NULL,   /* 软链接 */
 
-    .open = jfs_open,
-    .opendir = jfs_opendir,
-    .access = jfs_access};
+    .open = NULL,
+    .opendir = NULL,
+    .access = NULL};
 /******************************************************************************
  * SECTION: Function Implementation
  *******************************************************************************/

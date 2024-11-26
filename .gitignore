@@ -7,3 +7,4 @@ fs/demo/.cache/clangd/index/ddriver.h.0E6A437249FD3F83.idx
 *.o.d
 build
 sfs
+.cache

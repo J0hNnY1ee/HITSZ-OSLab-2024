@@ -1,6 +1,6 @@
 #define _XOPEN_SOURCE 700
 
-#include "j1eefs.h"
+#include "../include/j1eefs.h"
 
 /******************************************************************************
 * SECTION: 宏定义
@@ -49,11 +49,11 @@ static struct fuse_operations operations = {
  * @return void*
  */
 void* j1eefs_init(struct fuse_conn_info * conn_info) {
-	if (sfs_mount(sfs_options) != JFS_ERROR_NONE) {
-        JFS_DBG("[%s] mount error\n", __func__);
-		fuse_exit(fuse_get_context()->fuse);
-		return NULL;
-	} 
+	/* TODO: 在这里进行挂载 */
+
+	/* 下面是一个控制设备的示例 */
+	super.fd = ddriver_open(j1eefs_options.device);
+	
 	return NULL;
 }
 
@@ -66,12 +66,7 @@ void* j1eefs_init(struct fuse_conn_info * conn_info) {
 void j1eefs_destroy(void* p) {
 	/* TODO: 在这里进行卸载 */
 	
-	if(jfs_umount()!= JFS_ERROR_NONE)
-	{
-		JFS_DBG("[%s] unmount error\n", __func__);
-		fuse_exit(fuse_get_context()->fuse);
-		return;
-	}
+	ddriver_close(super.fd);
 
 	return;
 }

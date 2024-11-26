@@ -20,13 +20,13 @@ options:
 -v            显示ddriver的类型[内核模块 / 用户静态链接库]
 -h            打印本帮助菜单
 三. 文件结构说明
-1. 项目根目录: /home/students/220110828/HITSZ-OSLab-2024
+1. 项目根目录: /home/lee/HITSZ-OSLab-2024
 |--driver           驱动文件
 |--fs               FUSE文件系统文件
 |--LICENSE          LICENSE GPL v3          
 |--README.md        实验相关说明
 |--setenv.sh        项目环境配置
-2. FUSE文件系统目录: 以/home/students/220110828/HITSZ-OSLab-2024/simplefs (SFS) 为例
+2. FUSE文件系统目录: 以/home/lee/HITSZ-OSLab-2024/simplefs (SFS) 为例
 |--.vscode          VSCode启动配置
 |--build            CMake构建目录
 |--CMake            CMake Module目录
@@ -39,7 +39,7 @@ options:
 |--README.md        SFS FUSE开发记录
 四. FUSE体验
 在本项目中，我们已经有了一个FUSE文件系统样例
-SFS  (/home/students/220110828/HITSZ-OSLab-2024/simplefs)
+SFS  (/home/lee/HITSZ-OSLab-2024/simplefs)
 大家直接SSH切到相应目录，打断点运行即可:
 注意SFS编译需要和一中步骤1 ~ 7一致
 ========================================================================

@@ -1,3 +1,4 @@
+break main
 break newfs_utils.c:85
 
 set exec-wrapper The wrapper for running programs is \

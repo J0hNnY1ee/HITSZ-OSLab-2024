@@ -77,8 +77,8 @@ typedef enum jfs_file_type { // 定义文件类型
 #define JFS_INO_OFS(ino) (nfs_super.inode_offset + JFS_BLKS_SZ(ino))
 #define JFS_DATA_OFS(dno) (nfs_super.data_offset + JFS_BLKS_SZ(dno))
 
-#define JFS_IS_DIR(pinode) (pinode->dentry->ftype == JFS_DIR)
-#define JFS_IS_REG(pinode) (pinode->dentry->ftype == JFS_REG_FILE)
+#define JFS_IS_DIR(pinode) (pinode->dentry_pa->ftype == JFS_DIR)
+#define JFS_IS_REG(pinode) (pinode->dentry_pa->ftype == JFS_REG_FILE)
 // #define JFS_IS_SYM_LINK(pinode)         (pinode->dentry->ftype ==
 // JFS_SYM_LINK)
 /******************************************************************************

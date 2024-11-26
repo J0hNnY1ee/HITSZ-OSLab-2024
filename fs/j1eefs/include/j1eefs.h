@@ -62,12 +62,12 @@ int jfs_rename(const char *, const char *);
 int jfs_utimens(const char *, const struct timespec tv[2]);
 int jfs_truncate(const char *, off_t);
 
-// int 			   jfs_symlink(const char *, const char *);
-// int 			   jfs_readlink(const char *, char *, size_t);
+int 			   jfs_symlink(const char *, const char *);
+int 			   jfs_readlink(const char *, char *, size_t);
 
 int jfs_open(const char *, struct fuse_file_info *);
 int jfs_opendir(const char *, struct fuse_file_info *);
-// int   			   jfs_access(const char *, int);
+int   			   jfs_access(const char *, int);
 /******************************************************************************
  * SECTION: j1eefs_debug.c
  *******************************************************************************/

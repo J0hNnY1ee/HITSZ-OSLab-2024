@@ -35,25 +35,27 @@ typedef enum jfs_file_type {
 #define JFS_ERROR_UNSUPPORTED   ENXIO
 #define JFS_ERROR_IO            EIO     /* Error Input/Output */
 #define JFS_ERROR_INVAL         EINVAL  /* Invalid Args */
-
-#define JFS_MAX_FILE_NAME       128
-#define JFS_INODE_PER_FILE      1
-#define JFS_DATA_PER_FILE       7
-#define JFS_DEFAULT_PERM        0777
-
+#define JFS_FLAG_BUF_DIRTY      0x1
+#define JFS_FLAG_BUF_OCCUPY     0x2
 #define JFS_IOC_MAGIC           'S'
 #define JFS_IOC_SEEK            _IO(JFS_IOC_MAGIC, 0)
 
-#define JFS_FLAG_BUF_DIRTY      0x1
-#define JFS_FLAG_BUF_OCCUPY     0x2
+#define JFS_MAX_FILE_NAME       128
+#define JFS_INODE_PER_FILE      1
+#define JFS_DATA_PER_FILE       15
+#define JFS_DEFAULT_PERM        0777
 
-// 磁盘布局设计,一个逻辑块能放8个inode
-#define JFS_INODE_PER_BLK       8     // 一个逻辑块能放8个inode
+
+
+
+
+// 磁盘布局设计,一个逻辑块能放16个inode
+#define JFS_INODE_PER_BLK       16     // 一个逻辑块能放16个inode
 #define JFS_SUPER_BLKS          1
 #define JFS_INODE_MAP_BLKS      1
 #define JFS_DATA_MAP_BLKS       1
-#define JFS_INODE_BLKS          64    // 4096/8/8(磁盘大小为4096个逻辑块，维护一个文件需要8个逻辑块即一个索引块+七个数据块)
-#define JFS_DATA_BLKS           4029  // 4096-64-1-1-1
+#define JFS_INODE_BLKS          16    // 4096/16/16(磁盘大小为4096个逻辑块，维护一个文件需要16个逻辑块即一个索引块+15个数据块)
+#define JFS_DATA_BLKS           4077  // 4096-32-1-1-1
 
 /******************************************************************************
 * SECTION: Macro Function
@@ -88,7 +90,6 @@ struct custom_options {
 };
 
 struct jfs_super {
-    /* TODO: Define yourself */
     uint32_t           magic;             // 幻数
     int                fd;                // 文件描述符
 
@@ -103,9 +104,9 @@ struct jfs_super {
     int                map_inode_offset;  // inode位图在磁盘中的偏移
 
     int                max_dno;           // 数据位图最大数量
-    uint8_t*           map_data;          // data位图内存起点
-    int                map_data_blks;     // data位图占用的逻辑块数量
-    int                map_data_offset;   // data位图在磁盘中的偏移
+    uint8_t*           map_dnode;          // data位图内存起点
+    int                map_dnode_blks;     // data位图占用的逻辑块数量
+    int                map_dnode_offset;   // data位图在磁盘中的偏移
 
     int                inode_offset;      // inode在磁盘中的偏移
     int                data_offset;       // data在磁盘中的偏移
@@ -164,8 +165,8 @@ struct jfs_super_d {
     int                map_inode_offset;  // inode位图在磁盘中的偏移
 
     int                max_dno;           // 数据位图最大数量
-    int                map_data_blks;     // data位图占用的逻辑块数量
-    int                map_data_offset;   // data位图在磁盘中的偏移
+    int                map_dnode_blks;     // data位图占用的逻辑块数量
+    int                map_dnode_offset;   // data位图在磁盘中的偏移
 
     int                inode_offset;      // inode在磁盘中的偏移
     int                data_offset;       // data在磁盘中的偏移

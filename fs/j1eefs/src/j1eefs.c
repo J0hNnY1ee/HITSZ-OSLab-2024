@@ -112,7 +112,7 @@ int jfs_mkdir(const char* path, mode_t mode) {
 	inode  = jfs_alloc_inode(dentry);
 	jfs_alloc_dentry(last_dentry->inode, dentry);
 	
-	return JFS_ERROR_NONE;
+	return JFS_ERROR_NONE; // 0
 }
 
 /**

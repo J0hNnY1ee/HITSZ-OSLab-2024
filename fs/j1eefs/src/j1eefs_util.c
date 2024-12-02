@@ -163,32 +163,6 @@ struct jfs_inode* jfs_alloc_inode(struct jfs_dentry * dentry) {
         }
     }
 
-    /*// 先按字节寻找空闲的inode位图
-    for (byte_cursor = 0; byte_cursor < JFS_BLKS_SZ(jfs_super.map_inode_blks); byte_cursor++)
-    {
-        // 再在该字节中遍历8个bit寻找空闲的inode位图
-        for (bit_cursor = 0; bit_cursor < UINT8_BITS; bit_cursor++) {
-            if((jfs_super.map_data[byte_cursor] & (0x1 << bit_cursor)) == 0) {    
-                // 当前dno_cursor位置空闲 
-                jfs_super.map_data[byte_cursor] |= (0x1 << bit_cursor);
-                inode->block_pointer[data_blks_num++] = dno_cursor;
-                // 分配完足够数量的位图再退出
-                if (data_blks_num == JFS_DATA_PER_FILE) {
-                    is_find_enough_entry = TRUE;          
-                    break;
-                }
-            }
-            dno_cursor++;
-        }
-        if (is_find_enough_entry) {
-            break;
-        }
-    }*/
-
-    // 上面的实现有问题,应该是预先分配一个数据块,等到这个数据块不够用的时候再分配新的数据块
-    // 具体实现应该放在alloc_dentry中，新建一个alloc_data函数辅助实现
-
-    // 未找到空闲结点
     if (!is_find_free_entry || ino_cursor >= jfs_super.max_ino)
         return -JFS_ERROR_NOSPACE;
 
@@ -225,12 +199,12 @@ struct jfs_inode* jfs_alloc_inode(struct jfs_dentry * dentry) {
     int dno_cursor        = 0; 
     int is_find_free_data = 0;
 
-    for (byte_cursor = 0; byte_cursor < JFS_BLKS_SZ(jfs_super.map_data_blks); byte_cursor++) {
+    for (byte_cursor = 0; byte_cursor < JFS_BLKS_SZ(jfs_super.map_dnode_blks); byte_cursor++) {
         // 再在该字节中遍历8个bit寻找空闲的inode位图
         for (bit_cursor = 0; bit_cursor < UINT8_BITS; bit_cursor++) {
-            if((jfs_super.map_data[byte_cursor] & (0x1 << bit_cursor)) == 0) {
+            if((jfs_super.map_dnode[byte_cursor] & (0x1 << bit_cursor)) == 0) {
                 // 当前dno_cursor位置空闲
-                jfs_super.map_data[byte_cursor] |= (0x1 << bit_cursor);
+                jfs_super.map_dnode[byte_cursor] |= (0x1 << bit_cursor);
                 is_find_free_data = 1;
                 break;
             }
@@ -307,10 +281,8 @@ int jfs_sync_inode(struct jfs_inode * inode) {
             data_blks_num++;
         }
     }
-    // 如果当前inode是文件，那么数据是文件内容，直接写即可 
     else if (JFS_IS_REG(inode)) { 
         // 这里也要保证i < inode->block_allocted
-        // 必做并不需要实现普通文件的write操作，虽然我们前面在alloc_node中为普通文件申请了数据块内存
         // 但我们并没有为其申请对应的数据位图，所以这里不需要写回去
         for (int i = 0; i < inode->block_allocted; i++) {
             if (jfs_driver_write(JFS_DATA_OFS(inode->block_pointer[i]), inode->data[i], JFS_BLKS_SZ(JFS_DATA_PER_FILE)) != JFS_ERROR_NONE) {
@@ -525,7 +497,7 @@ struct jfs_dentry* jfs_lookup(const char * path, boolean* is_find, boolean* is_r
 }
 
 /**
- * @brief 挂载sfs, Layout 如下
+ * @brief 挂载jfs, Layout 如下
  * 
  * Layout
  * 每8个Inode占用一个Blk
@@ -542,7 +514,7 @@ int jfs_mount(struct custom_options options){
     int                 inode_num;
     int                 map_inode_blks;
     int                 data_num;
-    int                 map_data_blks;
+    int                 map_dnode_blks;
     
     int                 super_blks;
     boolean             is_init = FALSE;
@@ -558,22 +530,20 @@ int jfs_mount(struct custom_options options){
     jfs_super.fd = driver_fd;
     ddriver_ioctl(JFS_DRIVER(), IOC_REQ_DEVICE_SIZE,  &jfs_super.sz_disk);
     ddriver_ioctl(JFS_DRIVER(), IOC_REQ_DEVICE_IO_SZ, &jfs_super.sz_io);
-    jfs_super.sz_blks = 2 * jfs_super.sz_io;  // 两个IO大小
-    // 新建根目录
-    root_dentry = new_dentry("/", JFS_DIR);
+    jfs_super.sz_blks = 2 * jfs_super.sz_io;  // 1024B
+
 
     // 读取磁盘超级块内容
     if (jfs_driver_read(JFS_SUPER_OFS, (uint8_t *)(&jfs_super_d), sizeof(struct jfs_super_d)) != JFS_ERROR_NONE) {
         return -JFS_ERROR_IO;
     }   
     
-    // 根据磁盘超级块的幻数判断是否是第一次挂载
+    // 若幻数不等就是第一次挂载
     if (jfs_super_d.magic != JFS_MAGIC_NUM) {    
-        // 计算各部分的大小
-        // 宏定义在type.h中
+
         super_blks      = JFS_SUPER_BLKS;
         map_inode_blks  = JFS_INODE_MAP_BLKS;
-        map_data_blks   = JFS_DATA_MAP_BLKS;
+        map_dnode_blks   = JFS_DATA_MAP_BLKS;
         inode_num       = JFS_INODE_BLKS;
         data_num        = JFS_DATA_BLKS;
 
@@ -581,10 +551,10 @@ int jfs_mount(struct custom_options options){
         jfs_super.max_ino               = inode_num;
         jfs_super.max_dno               = data_num;
         jfs_super_d.map_inode_blks      = map_inode_blks; 
-        jfs_super_d.map_data_blks       = map_data_blks; 
+        jfs_super_d.map_dnode_blks       = map_dnode_blks; 
         jfs_super_d.map_inode_offset    = JFS_SUPER_OFS + JFS_BLKS_SZ(super_blks);
-        jfs_super_d.map_data_offset     = jfs_super_d.map_inode_offset + JFS_BLKS_SZ(map_inode_blks);
-        jfs_super_d.inode_offset        = jfs_super_d.map_data_offset + JFS_BLKS_SZ(map_data_blks);
+        jfs_super_d.map_dnode_offset     = jfs_super_d.map_inode_offset + JFS_BLKS_SZ(map_inode_blks);
+        jfs_super_d.inode_offset        = jfs_super_d.map_dnode_offset + JFS_BLKS_SZ(map_dnode_blks);
         jfs_super_d.data_offset         = jfs_super_d.inode_offset + JFS_BLKS_SZ(inode_num);
 
         jfs_super_d.sz_usage            = 0;
@@ -604,9 +574,9 @@ int jfs_mount(struct custom_options options){
     jfs_super.inode_offset      = jfs_super_d.inode_offset;
 
     // 建立数据位图
-    jfs_super.map_data          = (uint8_t *)malloc(JFS_BLKS_SZ(jfs_super_d.map_data_blks));
-    jfs_super.map_data_blks     = jfs_super_d.map_data_blks;
-    jfs_super.map_data_offset   = jfs_super_d.map_data_offset;
+    jfs_super.map_dnode          = (uint8_t *)malloc(JFS_BLKS_SZ(jfs_super_d.map_dnode_blks));
+    jfs_super.map_dnode_blks     = jfs_super_d.map_dnode_blks;
+    jfs_super.map_dnode_offset   = jfs_super_d.map_dnode_offset;
     jfs_super.data_offset       = jfs_super_d.data_offset;
 
     // 从磁盘中读取索引位图
@@ -616,11 +586,12 @@ int jfs_mount(struct custom_options options){
     }
 
     // 从磁盘中读取数据位图
-    if (jfs_driver_read(jfs_super_d.map_data_offset, (uint8_t *)(jfs_super.map_data), 
-                        JFS_BLKS_SZ(jfs_super_d.map_data_blks)) != JFS_ERROR_NONE) {
+    if (jfs_driver_read(jfs_super_d.map_dnode_offset, (uint8_t *)(jfs_super.map_dnode), 
+                        JFS_BLKS_SZ(jfs_super_d.map_dnode_blks)) != JFS_ERROR_NONE) {
         return -JFS_ERROR_IO;
     }
-
+    // 新建根目录
+    root_dentry = new_dentry("/", JFS_DIR);
     // 分配根节点 
     if (is_init) {                                    
         root_inode = jfs_alloc_inode(root_dentry);
@@ -659,8 +630,8 @@ int jfs_umount() {
     jfs_super_d.map_inode_offset    = jfs_super.map_inode_offset;
     jfs_super_d.inode_offset        = jfs_super.inode_offset;
 
-    jfs_super_d.map_data_blks       = jfs_super.map_data_blks;
-    jfs_super_d.map_data_offset     = jfs_super.map_data_offset;
+    jfs_super_d.map_dnode_blks       = jfs_super.map_dnode_blks;
+    jfs_super_d.map_dnode_offset     = jfs_super.map_dnode_offset;
     jfs_super_d.data_offset         = jfs_super.data_offset;
     
     if (jfs_driver_write(JFS_SUPER_OFS, (uint8_t *)&jfs_super_d, 
@@ -675,14 +646,14 @@ int jfs_umount() {
     }
 
     // 将数据位图刷回磁盘
-    if (jfs_driver_write(jfs_super_d.map_data_offset, (uint8_t *)(jfs_super.map_data), 
-                         JFS_BLKS_SZ(jfs_super_d.map_data_blks)) != JFS_ERROR_NONE) {
+    if (jfs_driver_write(jfs_super_d.map_dnode_offset, (uint8_t *)(jfs_super.map_dnode), 
+                         JFS_BLKS_SZ(jfs_super_d.map_dnode_blks)) != JFS_ERROR_NONE) {
         return -JFS_ERROR_IO;
     }
 
     // 释放内存中的位图
     free(jfs_super.map_inode);
-    free(jfs_super.map_data);
+    free(jfs_super.map_dnode);
 
     // 关闭驱动 
     ddriver_close(JFS_DRIVER());
